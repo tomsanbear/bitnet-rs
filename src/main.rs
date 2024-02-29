@@ -2,6 +2,10 @@ use candle_core::{Device, Result};
 
 mod bitffn;
 mod bitlinear;
+mod bitnet_transformer;
+mod multi_head_attention;
+mod rmsnorm;
+mod transformer;
 mod utils;
 
 use crate::bitlinear::Bitlinear;

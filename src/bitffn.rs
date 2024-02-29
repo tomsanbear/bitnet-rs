@@ -19,7 +19,7 @@ pub struct BitFeedForward {
 
 impl BitFeedForward {
     #[allow(dead_code)]
-    fn load(dim: usize, ff_mult: usize, device: &Device) -> Result<Self> {
+    pub fn load(dim: usize, ff_mult: usize, device: &Device) -> Result<Self> {
         let hidden_dim = dim * ff_mult;
         let first = Bitlinear::load(dim, hidden_dim, &device)?;
         let second = relu;
