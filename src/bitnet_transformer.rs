@@ -1,4 +1,4 @@
-use crate::rmsnorm::RMSNorm;
+use crate::rms_norm::RMSNorm;
 use crate::transformer::Transformer;
 use candle_core::{Device, Module, Result, Tensor};
 use candle_nn::{embedding, seq, var_builder, Embedding, Sequential};
@@ -6,11 +6,6 @@ use candle_transformers::quantized_nn::linear;
 use candle_transformers::quantized_var_builder;
 
 struct BitNetTransformer {
-    num_tokens: usize,
-    dim: usize,
-    heads: usize,
-    depth: usize,
-    ff_mult: usize,
     embedding: Embedding,
     transformer: Transformer,
     to_logits: Sequential,
@@ -33,11 +28,6 @@ impl BitNetTransformer {
             .add(linear(dim, num_tokens, qvb)?);
         let embedding = embedding(num_tokens, dim, vb.clone())?;
         Ok(Self {
-            num_tokens,
-            dim,
-            heads,
-            depth,
-            ff_mult,
             transformer,
             to_logits,
             embedding,

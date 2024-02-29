@@ -42,13 +42,21 @@ impl Transformer {
 
 impl Module for Transformer {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        Ok(x.clone())
+        let mut output = x.clone();
+        println!("output: {:?}", output.shape());
+        for (attn, ffn) in self.layers.iter().zip(self.ffn_layers.iter()) {
+            output = (attn.forward(&output, Some(&output), Some(&output))? + output)?;
+            println!("output: {:?}", output.shape());
+            output = (ffn.forward(&output)? + output)?;
+            println!("output: {:?}", output.shape());
+        }
+        Ok(output)
     }
 }
 
 #[cfg(test)]
 mod transformer_tests {
-    use candle_core::{Device, Module, Result, Tensor};
+    use candle_core::{DType, Device, Module, Result, Tensor};
     use candle_nn::VarBuilder;
 
     #[test]
@@ -66,11 +74,11 @@ mod transformer_tests {
 
     #[test]
     fn it_forwards() -> Result<()> {
-        let vb = VarBuilder::zeros(candle_core::DType::F64, &Device::Cpu);
+        let vb = VarBuilder::zeros(DType::F64, &Device::Cpu);
         let tr = super::Transformer::new(512, 8, 6, 4, vb)?;
-        let x = Tensor::zeros(&[1, 512], candle_core::DType::F64, &Device::Cpu)?;
-        let y = tr.forward(&x)?;
-        assert_eq!(x.shape(), y.shape());
+        let input = Tensor::randn(0f64, 1.0f64, (1, 100, 512), &Device::Cpu)?;
+        let output = tr.forward(&input).unwrap();
+        assert_eq!(input.shape(), output.shape());
         Ok(())
     }
 }

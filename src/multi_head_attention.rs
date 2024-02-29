@@ -9,7 +9,6 @@ pub struct MultiHeadAttention {
     value: Linear,
     out: Linear,
     n_head: usize,
-    kv_cache: Option<(Tensor, Tensor)>,
 }
 
 impl MultiHeadAttention {
@@ -24,16 +23,14 @@ impl MultiHeadAttention {
             value,
             out,
             n_head,
-            kv_cache: None,
         })
     }
 
-    fn forward(
-        &mut self,
+    pub fn forward(
+        &self,
         x: &Tensor,
         xa: Option<&Tensor>,
         mask: Option<&Tensor>,
-        flush_cache: bool,
     ) -> Result<Tensor> {
         let q = self.query.forward(x)?;
         let (k, v) = match xa {
@@ -43,17 +40,9 @@ impl MultiHeadAttention {
                 (k, v)
             }
             Some(x) => {
-                if flush_cache {
-                    self.kv_cache = None;
-                }
-                if let Some((k, v)) = &self.kv_cache {
-                    (k.clone(), v.clone())
-                } else {
-                    let k = self.key.forward(x)?;
-                    let v = self.value.forward(x)?;
-                    self.kv_cache = Some((k.clone(), v.clone()));
-                    (k, v)
-                }
+                let k = self.key.forward(x)?;
+                let v = self.value.forward(x)?;
+                (k, v)
             }
         };
         let wv = self.qkv_attention(&q, &k, &v, mask)?;
@@ -74,22 +63,23 @@ impl MultiHeadAttention {
         v: &Tensor,
         mask: Option<&Tensor>,
     ) -> Result<Tensor> {
+        println!("q: {:?}", q.shape());
+        println!("k: {:?}", k.shape());
+        println!("v: {:?}", v.shape());
+        println!("mask: {:?}", mask.map(|x| x.shape()));
         let (_, n_ctx, n_state) = q.dims3()?;
         let scale = ((n_state / self.n_head) as f64).powf(-0.25);
         let q = (self.reshape_head(q)? * scale)?;
         let k = (self.reshape_head(k)?.transpose(2, 3)? * scale)?;
         let v = self.reshape_head(v)?.contiguous()?;
-        let mut qk = { q.matmul(&k)? };
+        let mut qk = q.matmul(&k)?;
         if let Some(mask) = mask {
+            // TODO: fix this error NarrowInvalidArgs
             let mask = mask.i((0..n_ctx, 0..n_ctx))?;
             qk = qk.broadcast_add(&mask)?
         }
         let w = { candle_nn::ops::softmax_last_dim(&qk)? };
         let wv = { w.matmul(&v)? }.transpose(1, 2)?.flatten_from(2)?;
         Ok(wv)
-    }
-
-    fn reset_kv_cache(&mut self) {
-        self.kv_cache = None;
     }
 }

@@ -16,7 +16,7 @@ mod sign_tests {
     use candle_core::{Device, Result, Tensor};
 
     #[test]
-    fn it_works_for_positives() -> Result<()> {
+    fn it_works() -> Result<()> {
         let input = vec![-3f32, -2f32, -1f32, 0f32, 1f32, 2f32, 3f32];
         let input_size = input.len();
         let tensor = Tensor::from_vec(input, (input_size,), &Device::Cpu)?;
