@@ -1,3 +1,5 @@
+use std::f32::EPSILON;
+
 use candle_core::{Device, Result, Tensor};
 use candle_nn::{LayerNorm, Module};
 
@@ -9,7 +11,6 @@ pub struct Bitlinear {
     weight: Tensor,
     gamma: Tensor,
     beta: Tensor,
-    eps: f64,
 }
 
 impl Bitlinear {
@@ -23,7 +24,6 @@ impl Bitlinear {
             weight: weight,
             gamma: gamma,
             beta: beta,
-            eps: 1e-5,
         })
     }
 }
@@ -32,27 +32,26 @@ impl Module for Bitlinear {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
         // Apply layer normalization
         // Torch uses ones as a default if the weight arg is omitted
-        let input_norm = LayerNorm::new_no_bias(x.ones_like()?, self.eps).forward(x)?;
+        let input_norm = LayerNorm::new_no_bias(x.ones_like()?, EPSILON.into()).forward(x)?;
+        println!("input_norm: {:?}", input_norm.shape());
 
         // Absmax quantization
         // The input_norm is currently a (1,1) we need to expand it to (1, in_features) to match the operations that follow
-        let quant_scale =
-            input_norm
-                .abs()?
-                .max_keepdim(1)?
-                .pad_with_same(1, 0, self.in_features - 1)?;
-        let gamma = self.gamma.clone();
-        let input_quant = (quant_scale / gamma.unsqueeze(0))?;
+        let quant_scale = input_norm.abs()?.max_keepdim(1)?;
+        println!("quant_scale: {:?}", quant_scale.shape());
+
+        let gamma = self.gamma.unsqueeze(0)?.unsqueeze(0)?;
+        let input_quant = (quant_scale / gamma)?;
         let input_quant = (sign(&input_norm)? * input_quant)?;
-        println!("{:?}", input_quant.shape());
+        println!("input_quant: {:?}", input_quant.shape());
 
         // 1 bit weight quantization
-        let weight_quant = sign(&self.weight)?;
-        println!("{:?}", weight_quant.shape());
+        let weight_quant = sign(&self.weight)?.unsqueeze(0)?;
+        println!("weight_quant: {:?}", weight_quant.shape());
 
         // MatMul with 1-bit weights using matmul for explicit operation
         let output = input_quant.matmul(&weight_quant.t()?)?;
-        println!("{:?}", output.shape());
+        println!("output: {:?}", output.shape());
 
         // Dequantize with learnable parameters
         let beta = self.beta.unsqueeze(0)?.broadcast_as(output.shape())?;

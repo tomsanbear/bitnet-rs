@@ -3,10 +3,6 @@ use candle_nn::{seq, Sequential};
 
 use crate::bitlinear::Bitlinear;
 
-pub fn relu(x: &Tensor) -> Result<Tensor> {
-    x.relu()
-}
-
 pub struct BitFeedForward {
     #[allow(dead_code)]
     dim: usize,
@@ -22,11 +18,10 @@ impl BitFeedForward {
     pub fn load(dim: usize, ff_mult: usize, device: &Device) -> Result<Self> {
         let hidden_dim = dim * ff_mult;
         let first = Bitlinear::load(dim, hidden_dim, &device)?;
-        let second = relu;
         let third = Bitlinear::load(hidden_dim, dim, &device)?;
         let first_out_features = first.out_features;
         let third_in_features = third.in_features;
-        let layer = seq().add(first).add(second).add(third);
+        let layer = seq().add(first).add(Tensor::relu).add(third);
         Ok(Self {
             dim: dim,
             ff_mult: ff_mult,
@@ -60,10 +55,10 @@ mod bitffn_tests {
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
-        let bff = super::BitFeedForward::load(512, 4, &Device::Cpu)?;
-        let input = Tensor::ones((1, 512), DType::F32, &Device::Cpu)?;
+        let bff = super::BitFeedForward::load(512, 1, &Device::Cpu)?;
+        let input = Tensor::ones((1, 1, 512), DType::F64, &Device::Cpu)?;
         let output = bff.forward(&input).unwrap();
-        assert_eq!(output.shape().dims(), &[1, 512]);
+        assert_eq!(output.shape().dims(), &[1, 1, 512]);
         Ok(())
     }
 }
