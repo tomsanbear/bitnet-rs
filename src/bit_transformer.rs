@@ -4,13 +4,13 @@ use crate::transformer::Transformer;
 use candle_core::{Module, Result, Tensor};
 use candle_nn::{embedding, linear, seq, var_builder, Embedding, Sequential};
 
-struct BitNetTransformer {
+struct BitTransformer {
     embed_tokens: Embedding,
     transformer: Transformer,
     to_logits: Sequential,
 }
 
-impl BitNetTransformer {
+impl BitTransformer {
     pub fn load(config: Config, vb: var_builder::VarBuilder) -> Result<Self> {
         let transformer = Transformer::new(config, vb.clone())?;
         let to_logits = seq()
@@ -36,7 +36,7 @@ impl BitNetTransformer {
 mod bitnet_transformer_tests {
     use crate::utils::device;
 
-    use super::BitNetTransformer;
+    use super::BitTransformer;
     use candle_core::{Device, Result, Tensor};
     use candle_nn::VarBuilder;
 
@@ -56,7 +56,7 @@ mod bitnet_transformer_tests {
             sliding_window: 256,
             use_flash_attn: true,
         };
-        BitNetTransformer::load(config, vb)?;
+        BitTransformer::load(config, vb)?;
         Ok(())
     }
 
@@ -78,7 +78,7 @@ mod bitnet_transformer_tests {
             sliding_window: 256,
             use_flash_attn: true,
         };
-        let mut t = BitNetTransformer::load(config, vb)?;
+        let mut t = BitTransformer::load(config, vb)?;
         let x = Tensor::ones(256, dtype, device)?
             .unsqueeze(0)?
             .unsqueeze(0)?;

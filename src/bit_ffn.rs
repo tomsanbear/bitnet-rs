@@ -1,7 +1,7 @@
 use candle_core::{Device, Module, Result, Tensor};
 use candle_nn::{seq, Sequential};
 
-use crate::bitlinear::Bitlinear;
+use crate::bit_linear::Bitlinear;
 
 pub struct BitFeedForward {
     layer: Sequential,

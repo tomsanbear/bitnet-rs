@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::bitffn::BitFeedForward;
+use crate::bit_ffn::BitFeedForward;
 use crate::config::Config;
 use crate::{attention::Attention, rotary_embedding::RotaryEmbedding};
 use candle_core::{Module, Result, Tensor};

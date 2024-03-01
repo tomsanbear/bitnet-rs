@@ -1,5 +1,3 @@
-use candle_nn::Activation;
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Config {
     pub(crate) vocab_size: usize,
