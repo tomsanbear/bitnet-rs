@@ -4,31 +4,18 @@ use candle_nn::{seq, Sequential};
 use crate::bitlinear::Bitlinear;
 
 pub struct BitFeedForward {
-    #[allow(dead_code)]
-    dim: usize,
-    #[allow(dead_code)]
-    ff_mult: usize,
     layer: Sequential,
-    pub first_out_features: usize,
-    pub third_in_features: usize,
 }
 
 impl BitFeedForward {
     #[allow(dead_code)]
     pub fn load(dim: usize, ff_mult: usize, device: &Device) -> Result<Self> {
         let hidden_dim = dim * ff_mult;
-        let first = Bitlinear::load(dim, hidden_dim, &device)?;
-        let third = Bitlinear::load(hidden_dim, dim, &device)?;
-        let first_out_features = first.out_features;
-        let third_in_features = third.in_features;
-        let layer = seq().add(first).add(Tensor::relu).add(third);
-        Ok(Self {
-            dim: dim,
-            ff_mult: ff_mult,
-            layer: layer,
-            first_out_features: first_out_features,
-            third_in_features: third_in_features,
-        })
+        let layer = seq()
+            .add(Bitlinear::load(dim, hidden_dim, &device)?)
+            .add(Tensor::gelu)
+            .add(Bitlinear::load(hidden_dim, dim, &device)?);
+        Ok(Self { layer: layer })
     }
 }
 
@@ -40,25 +27,45 @@ impl Module for BitFeedForward {
 
 #[cfg(test)]
 mod bitffn_tests {
-    use candle_core::{DType, Device, Module, Result, Tensor};
+    use candle_core::{Device, Module, Result, Tensor};
+
+    use crate::utils::device;
 
     #[test]
     fn it_loads() -> Result<()> {
         let bl = super::BitFeedForward::load(512, 4, &Device::Cpu)?;
-        assert_eq!(bl.dim, 512);
-        assert_eq!(bl.ff_mult, 4);
         assert_eq!(bl.layer.len(), 3);
-        assert_eq!(bl.first_out_features, 512 * 4);
-        assert_eq!(bl.third_in_features, 512 * 4);
         Ok(())
     }
 
     #[test]
-    fn it_applies_forward_pass() -> Result<()> {
-        let bff = super::BitFeedForward::load(512, 1, &Device::Cpu)?;
-        let input = Tensor::ones((1, 1, 512), DType::F64, &Device::Cpu)?;
+    fn it_applies_forward_pass_dim_2() -> Result<()> {
+        let device = device(true)?;
+        let dim = 128;
+        let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
+        let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
         let output = bff.forward(&input).unwrap();
-        assert_eq!(output.shape().dims(), &[1, 1, 512]);
+        let output_shape = output.shape().dims2()?;
+
+        assert_eq!(output_shape.0, 10);
+        assert_eq!(output_shape.1, dim);
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_applies_forward_pass_dim_3() -> Result<()> {
+        let device = device(true)?;
+        let dim = 128;
+        let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
+        let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
+        let output = bff.forward(&input).unwrap();
+        let output_shape = output.shape().dims3()?;
+
+        assert_eq!(output_shape.0, 1);
+        assert_eq!(output_shape.1, 10);
+        assert_eq!(output_shape.2, dim);
+
         Ok(())
     }
 }
