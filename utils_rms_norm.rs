@@ -41,7 +41,7 @@ mod rmsnorm_tests {
     fn it_applies_forward_pass() -> Result<()> {
         let vb = VarBuilder::zeros(DType::F64, &Device::Cpu);
         let rmsnorm = RmsNorm::load(1e-6, 512, vb)?;
-        let input = Tensor::ones((1, 512), DType::F64, &Device::Cpu)?;
+        let input = Tensor::ones((1, 512), DType::F32, &Device::Cpu)?;
         let output = rmsnorm.forward(&input).unwrap();
         assert_eq!(output.shape().dims(), &[1, 512]);
         Ok(())
