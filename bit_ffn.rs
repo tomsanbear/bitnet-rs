@@ -1,4 +1,4 @@
-use candle_core::{Device, Module, Result, Tensor};
+use candle_core::{Device, Module, Tensor};
 use candle_nn::{seq, Sequential};
 
 use crate::bit_linear::Bitlinear;
@@ -9,18 +9,18 @@ pub struct BitFeedForward {
 
 impl BitFeedForward {
     #[allow(dead_code)]
-    pub fn load(dim: usize, ff_mult: usize, device: &Device) -> Result<Self> {
+    pub fn load(dim: usize, ff_mult: usize, device: &Device) -> candle_core::Result<Self> {
         let hidden_dim = dim * ff_mult;
         let layer = seq()
-            .add(Bitlinear::load(dim, hidden_dim, &device)?)
+            .add(Bitlinear::load(dim, hidden_dim, device)?)
             .add(Tensor::gelu)
-            .add(Bitlinear::load(hidden_dim, dim, &device)?);
+            .add(Bitlinear::load(hidden_dim, dim, device)?);
         Ok(Self { layer: layer })
     }
 }
 
 impl Module for BitFeedForward {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, x: &Tensor) -> candle_core::Result<Tensor> {
         self.layer.forward(x)
     }
 }
@@ -29,7 +29,7 @@ impl Module for BitFeedForward {
 mod bitffn_tests {
     use candle_core::{Device, Module, Result, Tensor};
 
-    use crate::utils::device;
+    use crate::utils_tensor::device;
 
     #[test]
     fn it_loads() -> Result<()> {
@@ -40,7 +40,7 @@ mod bitffn_tests {
 
     #[test]
     fn it_applies_forward_pass_dim_2() -> Result<()> {
-        let device = device(true)?;
+        let device = device(true).unwrap();
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
         let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
@@ -55,7 +55,7 @@ mod bitffn_tests {
 
     #[test]
     fn it_applies_forward_pass_dim_3() -> Result<()> {
-        let device = device(true)?;
+        let device = device(true).unwrap();
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
         let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
