@@ -151,6 +151,7 @@ pub fn scaled_dot_product_gqa(
             let key_transposed = key.transpose(D::Minus2, D::Minus1)?; // [batch, heads, depth, seq_len]
 
             // Perform batched matrix multiplication.
+            // Candle forces us to call contiguous here after our shenanigans above, look into alternatives or see if torch does this under the hood
             query_for_matmul.matmul(&key_transposed.contiguous()?)
         }
         false => {
@@ -225,14 +226,18 @@ pub fn scaled_dot_product_gqa(
             // output: (b, n, h, d).
             // python code:
             // attn_weights = rearrange(attention, "b h n s -> b n s h")
+            println!("attention: {:?}", attention.shape().dims());
             let attn_weights = attention.permute([0, 2, 3, 1])?;
+            println!("attn_weights: {:?}", attn_weights.shape().dims());
             // if average_attn_weights:
             //   attn_weights = attn_weights.mean(dim=1)
-            let attn_weights = match average_attn_weights {
-                true => attn_weights.mean(1)?,
-                false => attn_weights,
-            };
-            Some(attn_weights)
+            if average_attn_weights {
+                let attn_weights = attn_weights.mean_keepdim(1)?;
+                println!("attn_weights: {:?}", attn_weights.shape().dims());
+                Some(attn_weights)
+            } else {
+                Some(attn_weights)
+            }
         }
     };
 
