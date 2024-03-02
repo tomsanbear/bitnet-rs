@@ -15,7 +15,7 @@ impl BitFeedForward {
             .add(Bitlinear::load(dim, hidden_dim, device)?)
             .add(Tensor::gelu)
             .add(Bitlinear::load(hidden_dim, dim, device)?);
-        Ok(Self { layer: layer })
+        Ok(Self { layer })
     }
 }
 

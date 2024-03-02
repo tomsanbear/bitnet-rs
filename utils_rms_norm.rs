@@ -1,6 +1,6 @@
 use candle_core::{Module, Result, Tensor};
 use candle_nn::VarBuilder;
-use tracing;
+
 #[derive(Debug, Clone)]
 pub struct RmsNorm {
     inner: candle_nn::RmsNorm,

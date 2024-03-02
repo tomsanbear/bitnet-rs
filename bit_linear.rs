@@ -17,9 +17,9 @@ impl Bitlinear {
     ) -> candle_core::Result<Self> {
         let weight: Tensor = Tensor::randn(0f32, 1f32, (out_features, in_features), device)?;
         Ok(Self {
-            in_features: in_features,
-            out_features: out_features,
-            weight: weight,
+            in_features,
+            out_features,
+            weight,
         })
     }
 }

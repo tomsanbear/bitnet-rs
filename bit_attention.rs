@@ -69,17 +69,17 @@ impl BitAttention {
         // TODO: Original project makes a call to reset parameters, investigate why
 
         Ok(BitAttention {
-            q_proj: q_proj,
-            k_proj: k_proj,
-            v_proj: v_proj,
-            norm: norm,
+            q_proj,
+            k_proj,
+            v_proj,
+            norm,
             query_heads,
             kv_heads,
             head_dim,
-            out_proj: out_proj,
-            dropout: dropout,
-            bias_enabled: bias_enabled,
-            gamma_init: gamma_init,
+            out_proj,
+            dropout,
+            bias_enabled,
+            gamma_init,
             device: vb.device().clone(),
             dtype: vb.dtype(),
         })

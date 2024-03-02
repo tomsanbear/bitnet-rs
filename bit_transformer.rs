@@ -15,7 +15,7 @@ pub struct Transformer {
 
 impl Transformer {
     pub fn new(
-        num_tokens: usize,
+        _num_tokens: usize,
         dim: usize,
         heads: usize,
         depth: usize,
