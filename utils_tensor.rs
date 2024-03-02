@@ -71,7 +71,7 @@ fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor>
     println!("on_true: {:?}", on_true.shape().dims());
     println!("on_false: {:?}", on_false.shape().dims());
     println!("mask: {:?}", mask.shape().dims());
-    let m = on_false.broadcast_mul(mask)?;
+    let m = on_false.broadcast_mul(&mask.to_dtype(DType::F32)?)?;
     Ok(m)
 }
 

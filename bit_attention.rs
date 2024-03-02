@@ -31,6 +31,7 @@ impl BitAttention {
         gamma_init: f32,
         vb: VarBuilder,
     ) -> Result<Self> {
+        let vb = VarBuilder::zeros(DType::F32, vb.device());
         let kv_embed_dim = embed_dim / query_heads * kv_heads;
         let head_dim = embed_dim / query_heads;
         if query_heads % kv_heads != 0 {
@@ -59,7 +60,8 @@ impl BitAttention {
                     eps: layer_norm_eps,
                     ..LayerNormConfig::default()
                 };
-                Some(layer_norm(embed_dim, config, vb.clone())?)
+                // TODO: need a way to avoid converting to and from f32
+                Some(layer_norm(kv_embed_dim, config, vb.clone())?)
             }
             false => None,
         };
@@ -116,9 +118,6 @@ impl BitAttention {
             let depth_per_head = total_depth / self.kv_heads;
             v.reshape((batch_size, num_queries, self.kv_heads, depth_per_head))?
         };
-        println!("q: {:?}", q.dims());
-        println!("k: {:?}", k.dims());
-        println!("v: {:?}", v.dims());
 
         let (x, attn_weights) = scaled_dot_product_gqa(
             q,
@@ -132,10 +131,20 @@ impl BitAttention {
             &self.device,
             self.dtype,
         )?;
-        println!("x: {:?}", x.shape().dims());
 
         // x = rearrange(x, "b n h d -> b n (h d)")
-        let x = x.permute([0, 1, 3, 2])?;
+        let x_dims = x.dims4()?;
+        let x = x.reshape((x_dims.0, x_dims.1, x_dims.2 * x_dims.3))?;
+
+        // Original source mentions the magneto paper, need to read on this and the impact
+        println!("{:?}", self.norm);
+        let x = match self.norm {
+            Some(ref norm) => norm.forward(&x)?,
+            None => x,
+        };
+
+        // Linear projection on the attn outputs
+        let x = self.out_proj.forward(&x)?;
 
         Ok((x, attn_weights))
     }
@@ -144,26 +153,38 @@ impl BitAttention {
 #[cfg(test)]
 mod bit_attention_tests {
     use crate::{bit_attention::BitAttention, utils_tensor::device};
-    use candle_core::{Result, Tensor};
+    use candle_core::{safetensors, Result};
     use candle_nn::VarBuilder;
 
     #[test]
-    fn it_works() -> Result<()> {
+    fn it_matches_python_snapshot() -> Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
-        let bit_attention =
-            BitAttention::load(512, 8, 4, 0.0, false, false, 1e-5, 1.0, vb).unwrap();
-        let input = Tensor::randn(0f32, 1.0, (1, 10, 512), &device)?;
-        let _out = bit_attention
+
+        let safetensor = safetensors::load("test_data/bit_attention_test.safetensors", &device)?;
+
+        let input_tensor = safetensor.get("input_small").unwrap();
+        let expected_output_tensor = safetensor.get("output_small").unwrap();
+        let expected_attn_weights = safetensor.get("attn_weights_small").unwrap();
+
+        let bit_attention = BitAttention::load(512, 8, 4, 0.1, true, false, 1e-5, 1.0, vb).unwrap();
+
+        let (output_tensor, attn_weights) = bit_attention
             .forward(
-                input.clone(),
-                input.clone(),
-                input.clone(),
+                input_tensor.clone(),
+                input_tensor.clone(),
+                input_tensor.clone(),
                 true,
                 false,
                 false,
             )
             .unwrap();
+
+        assert_eq!(output_tensor.shape(), expected_output_tensor.shape());
+        assert_eq!(attn_weights.unwrap().shape(), expected_attn_weights.shape());
+
+        // TODO: need to provide a seed to compare actual numbers
+
         Ok(())
     }
 }

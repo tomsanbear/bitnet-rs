@@ -4,9 +4,11 @@ use crate::bit_attention::BitAttention;
 use crate::bit_ffn::BitFeedForward;
 use crate::utils_rms_norm::RmsNorm;
 use anyhow::Result;
-use candle_core::{Module, Tensor};
-use candle_nn::VarBuilder;
-use candle_nn::{embedding, linear, seq, var_builder, Embedding, Sequential};
+use candle_core::{Device, Module, Tensor};
+use candle_nn::{embedding, linear, seq, Embedding, Sequential, VarBuilder};
+
+#[cfg(feature = "accelerate")]
+extern crate accelerate_src;
 
 pub struct Transformer {
     attn_layers: Vec<BitAttention>,
@@ -48,7 +50,6 @@ impl Transformer {
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
         let mut x = x.clone();
-        println!("x: {:?}", x.shape().dims());
         for (attn, ffn) in self.attn_layers.iter_mut().zip(self.ffn_layers.iter()) {
             (x, _) = attn.forward(x.clone(), x.clone(), x.clone(), false, true, false)?;
             x = x.add(&x)?;
@@ -59,7 +60,7 @@ impl Transformer {
 }
 
 struct BitTransformer {
-    embed_tokens: Embedding,
+    embedding: Embedding,
     transformer: Transformer,
     to_logits: Sequential,
 }
@@ -71,27 +72,31 @@ impl BitTransformer {
         num_tokens: usize,
         heads: usize,
         ff_mult: usize,
-        vb: var_builder::VarBuilder,
+        device: &Device,
     ) -> Result<Self> {
-        let embed_tokens = embedding(num_tokens, dim, vb.pp("transformer.word_embeddings"))?;
-        let transformer = Transformer::new(num_tokens, dim, heads, depth, ff_mult, vb.clone())?;
-        let to_logits = seq().add(RmsNorm::load(1e-6, dim, vb.clone())?).add(linear(
-            dim,
-            num_tokens,
-            vb.clone(),
-        )?);
+        let t_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
+        let e_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
+        let embedding = embedding(num_tokens, dim, e_vb.pp("weight"))?;
+        println!("embedding: {:?}", embedding);
+        let transformer = Transformer::new(num_tokens, dim, heads, depth, ff_mult, t_vb.clone())?;
+        let to_logits = seq()
+            .add(RmsNorm::load(1e-6, dim, t_vb.clone())?)
+            .add(linear(dim, num_tokens, e_vb.clone())?);
         Ok(Self {
             transformer,
             to_logits,
-            embed_tokens,
+            embedding,
         })
     }
 
     fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        let output = self.embed_tokens.forward(x)?;
-        let output = self.transformer.forward(&output)?;
-        let output = self.to_logits.forward(&output)?;
-        Ok(output)
+        println!("x: {:?}", x);
+        let x = self.embedding.forward(x)?;
+        println!("x: {:?}", x);
+        let x = self.transformer.forward(&x)?;
+        println!("x: {:?}", x);
+        let x = self.to_logits.forward(&x)?;
+        Ok(x)
     }
 }
 
@@ -101,26 +106,18 @@ mod bitnet_transformer_tests {
 
     use super::BitTransformer;
     use anyhow::Result;
-    use candle_core::{Device, Tensor};
-    use candle_nn::VarBuilder;
-
-    #[test]
-    fn it_loads() -> Result<()> {
-        let vb = VarBuilder::zeros(candle_core::DType::F32, &Device::Cpu);
-        BitTransformer::load(512, 6, 20000, 8, 4, vb)?;
-        Ok(())
-    }
+    use candle_core::Tensor;
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
-        let dtype = candle_core::DType::BF16;
+        let dtype = candle_core::DType::U32;
         let device = &device(false)?;
-        let vb = VarBuilder::zeros(dtype, device);
-        let mut t = BitTransformer::load(512, 6, 20000, 8, 4, vb)?;
-        let x = Tensor::ones(256, dtype, device)?
-            .unsqueeze(0)?
-            .unsqueeze(0)?;
-        t.forward(&x)?;
+        let mut t = BitTransformer::load(1024, 6, 20000, 8, 4, device)?;
+        let x = Tensor::ones((1, 1024), dtype, device)?;
+        let x = t.forward(&x)?;
+
+        assert_eq!(x.shape().dims(), &[1, 1024, 20000]);
+
         Ok(())
     }
 }
