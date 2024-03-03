@@ -2,6 +2,7 @@ use crate::bit_transformer::BitTransformer;
 use anyhow::Result;
 use candle_core::{Device, Tensor, D};
 
+use candle_nn::loss::cross_entropy;
 use candle_transformers::generation::LogitsProcessor;
 
 pub struct AutoregressiveWrapper {
@@ -11,7 +12,7 @@ pub struct AutoregressiveWrapper {
 }
 
 impl AutoregressiveWrapper {
-    pub fn new(net: BitTransformer, seed: u64, device: Device) -> Self {
+    pub fn new(seed: u64, net: BitTransformer, device: Device) -> Self {
         Self { net, device, seed }
     }
 
@@ -43,6 +44,20 @@ impl AutoregressiveWrapper {
         }
         Ok(output)
     }
+
+    pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
+        // Original python implementation
+        // x_inp, x_labels = x[:, :-1], x[:, 1:]
+        // logits = self.net(x_inp, **kwargs)
+        let x_inp = x.index_select(&Tensor::new(0f32, &self.device)?, D::Minus1)?;
+        let x_labels = x.index_select(&Tensor::new(1f32, &self.device)?, D::Minus1)?;
+        let logits = self.net.forward(&x_inp)?;
+        // rearrange logits "b c n -> b n c"
+        let logits = logits.permute((0, 2, 1))?;
+        // return F.cross_entropy(logits, x_labels)
+        let x = cross_entropy(&logits, &x_labels)?;
+        Ok(x)
+    }
 }
 
 #[cfg(test)]
@@ -59,7 +74,7 @@ mod inference_tests {
         let device = device(false)?;
 
         let net: BitTransformer = BitTransformer::load(128, 8, 256, 8, 4, &device.clone()).unwrap();
-        let mut wrapper = AutoregressiveWrapper::new(net, 1024, device.clone());
+        let mut wrapper = AutoregressiveWrapper::new(0, net, device.clone());
 
         let start_tokens =
             Tensor::ones((1, 128), candle_core::DType::U32, &device.clone()).unwrap();

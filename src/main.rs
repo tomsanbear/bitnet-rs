@@ -7,6 +7,7 @@ mod bit_linear;
 mod bit_transformer;
 mod config;
 mod inference;
+mod training;
 mod utils_rms_norm;
 mod utils_tensor;
 
@@ -15,7 +16,8 @@ use candle_core::Tensor;
 use clap::Parser;
 
 use crate::{
-    bit_transformer::BitTransformer, inference::AutoregressiveWrapper, utils_tensor::device,
+    bit_transformer::BitTransformer, inference::AutoregressiveWrapper, training::train,
+    utils_tensor::device,
 };
 
 #[cfg(feature = "accelerate")]
@@ -65,6 +67,10 @@ fn main() -> Result<()> {
         None
     };
 
+    // Run Training
+
+    train()?;
+
     let device = device(false)?;
     let net = BitTransformer::load(
         args.dim,
@@ -74,7 +80,11 @@ fn main() -> Result<()> {
         args.ff_mult,
         &device,
     )?;
-    let mut wrapper = AutoregressiveWrapper::new(net, 1024, device.clone());
+    let mut wrapper = AutoregressiveWrapper::new(0, net, device.clone());
+
+    // Run the model forward to train
+
+    // Generate some tokens
 
     let start_tokens = Tensor::ones((1, 256), candle_core::DType::U32, &device.clone()).unwrap();
 
