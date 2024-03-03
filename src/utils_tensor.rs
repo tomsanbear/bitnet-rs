@@ -101,9 +101,9 @@ pub fn scaled_dot_product_gqa(
     let value = value.permute([0, 2, 1, 3])?;
 
     // Extract the dimensions
-    let (bq, hq, nq, dq) = query.shape().dims4()?;
-    let (bk, hk, nk, dk) = key.shape().dims4()?;
-    let (bv, hv, nv, dv) = value.shape().dims4()?;
+    let (bq, hq, nq, dq) = query.dims4()?;
+    let (bk, hk, nk, dk) = key.dims4()?;
+    let (bv, hv, nv, dv) = value.dims4()?;
 
     // All batch sizes must be equal
     if !(bq == bk && bq == bv) {
@@ -142,13 +142,12 @@ pub fn scaled_dot_product_gqa(
             let query_reshaped =
                 query.reshape((batch_size, num_head_groups, heads, seq_len, depth))?;
 
-            let query_for_matmul = query_reshaped.sum(1)?; // Summing, not the exact operation but an example approach
+            let query_for_matmul = query_reshaped.sum(1)?;
 
             // Transpose the last two dimensions of key to align them for matmul.
             let key_transposed = key.transpose(D::Minus2, D::Minus1)?; // [batch, heads, depth, seq_len]
 
             // Perform batched matrix multiplication.
-            // Candle forces us to call contiguous here after our shenanigans above, look into alternatives or see if torch does this under the hood
             query_for_matmul.matmul(&key_transposed.contiguous()?)
         }
         false => {
@@ -238,7 +237,9 @@ pub fn scaled_dot_product_gqa(
 #[cfg(test)]
 mod scaled_dot_product_gqa_tests {
     use crate::utils_tensor::{device, scaled_dot_product_gqa};
+    use anyhow::Result;
     use candle_core::{safetensors, DType};
+    use test::Bencher;
 
     macro_rules! python_snapshot_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -312,5 +313,38 @@ mod scaled_dot_product_gqa_tests {
     python_snapshot_tests! {
         it_matches_snapshot_small: "small",
         it_matches_snapshot_large: "large",
+    }
+
+    #[bench]
+    fn bench_scaled_dot_product_gqa(b: &mut Bencher) -> Result<()> {
+        let device = device(true).unwrap();
+        let dtype = DType::F32;
+        let safetensor =
+            safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
+
+        let input_tensor = match safetensor.get("small_input") {
+            Some(tensor) => tensor,
+            None => panic!("Input tensor not found"),
+        };
+
+        b.iter(|| {
+            for _ in 1..100 {
+                scaled_dot_product_gqa(
+                    input_tensor.clone(),
+                    input_tensor.clone(),
+                    input_tensor.clone(),
+                    true,
+                    true,
+                    true,
+                    true,
+                    0.0,
+                    &device,
+                    dtype,
+                )
+                .unwrap();
+            }
+        });
+
+        Ok(())
     }
 }

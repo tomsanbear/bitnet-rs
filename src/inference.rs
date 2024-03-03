@@ -58,7 +58,7 @@ mod inference_tests {
     fn test_inference() -> Result<()> {
         let device = device(false)?;
 
-        let net = BitTransformer::load(128, 8, 256, 8, 4, &device.clone()).unwrap();
+        let net: BitTransformer = BitTransformer::load(128, 8, 256, 8, 4, &device.clone()).unwrap();
         let mut wrapper = AutoregressiveWrapper::new(net, 1024, device.clone());
 
         let start_tokens =

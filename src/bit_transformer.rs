@@ -47,7 +47,7 @@ impl Transformer {
         for (attn, ffn) in self.attn_layers.iter_mut().zip(self.ffn_layers.iter()) {
             (x, _) = attn.forward(x.clone(), x.clone(), x.clone(), false, true, false)?;
             x = x.add(&x)?;
-            x = (ffn.forward(&x) + x)?
+            x = (ffn.forward(&x) + &x)?
         }
         Ok(x)
     }
@@ -83,7 +83,7 @@ impl BitTransformer {
     }
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        let x = self.embedding.forward(x)?;
+        let x = self.embedding.forward(&x)?;
         let x = self.transformer.forward(&x)?;
         let x = self.to_logits.forward(&x)?;
         Ok(x)
@@ -96,7 +96,8 @@ mod bitnet_transformer_tests {
 
     use super::BitTransformer;
     use anyhow::Result;
-    use candle_core::Tensor;
+    use candle_core::{DType, Tensor};
+    use test::Bencher;
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
@@ -107,6 +108,21 @@ mod bitnet_transformer_tests {
         let x = t.forward(&x)?;
 
         assert_eq!(x.shape().dims(), &[1, 128, 20000]);
+
+        Ok(())
+    }
+
+    #[bench]
+    fn bench_bit_transformer(b: &mut Bencher) -> Result<()> {
+        let device = &device(false)?;
+
+        b.iter(|| {
+            for _ in 1..10 {
+                let mut t = BitTransformer::load(128, 6, 20000, 8, 4, device).unwrap();
+                let x = Tensor::ones((1, 128), DType::U32, device).unwrap();
+                t.forward(&x).unwrap();
+            }
+        });
 
         Ok(())
     }
