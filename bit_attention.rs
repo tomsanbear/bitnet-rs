@@ -10,11 +10,8 @@ pub struct BitAttention {
     norm: Option<candle_nn::LayerNorm>,
     out_proj: Bitlinear,
     dropout: f32,
-    head_dim: usize,
     query_heads: usize,
     kv_heads: usize,
-    bias_enabled: bool,
-    gamma_init: f32,
     device: Device,
     dtype: DType,
 }
@@ -25,10 +22,8 @@ impl BitAttention {
         query_heads: usize,
         kv_heads: usize,
         dropout: f32,
-        bias_enabled: bool,
         layer_norm_enabled: bool,
         layer_norm_eps: f64,
-        gamma_init: f32,
         vb: VarBuilder,
     ) -> Result<Self> {
         let vb = VarBuilder::zeros(DType::F32, vb.device());
@@ -77,11 +72,8 @@ impl BitAttention {
             norm,
             query_heads,
             kv_heads,
-            head_dim,
             out_proj,
             dropout,
-            bias_enabled,
-            gamma_init,
             device: vb.device().clone(),
             dtype: vb.dtype(),
         })
@@ -166,7 +158,7 @@ mod bit_attention_tests {
         let expected_output_tensor = safetensor.get("output_small").unwrap();
         let expected_attn_weights = safetensor.get("attn_weights_small").unwrap();
 
-        let bit_attention = BitAttention::load(512, 8, 4, 0.1, true, false, 1e-5, 1.0, vb).unwrap();
+        let bit_attention = BitAttention::load(512, 8, 4, 0.1, false, 1e-5, vb).unwrap();
 
         let (output_tensor, attn_weights) = bit_attention
             .forward(

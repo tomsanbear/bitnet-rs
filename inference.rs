@@ -3,32 +3,16 @@ use anyhow::Result;
 use candle_core::{Device, Tensor, D};
 
 use candle_transformers::generation::LogitsProcessor;
-use rand::distributions::Distribution;
-use rand::{self};
 
 pub struct AutoregressiveWrapper {
     net: BitTransformer,
-    max_seq_len: usize,
-    pad_value: usize,
     device: Device,
     seed: u64,
 }
 
 impl AutoregressiveWrapper {
-    pub fn new(
-        net: BitTransformer,
-        max_seq_len: usize,
-        pad_value: usize,
-        seed: u64,
-        device: Device,
-    ) -> Self {
-        Self {
-            net,
-            max_seq_len,
-            pad_value,
-            device,
-            seed,
-        }
+    pub fn new(net: BitTransformer, seed: u64, device: Device) -> Self {
+        Self { net, device, seed }
     }
 
     pub fn generate(
@@ -75,7 +59,7 @@ mod inference_tests {
         let device = device(false)?;
 
         let net = BitTransformer::load(512, 8, 256, 8, 4, &device.clone()).unwrap();
-        let mut wrapper = AutoregressiveWrapper::new(net, 1024, 0, 0, device.clone());
+        let mut wrapper = AutoregressiveWrapper::new(net, 1024, device.clone());
 
         let start_tokens =
             Tensor::ones((1, 256), candle_core::DType::U32, &device.clone()).unwrap();

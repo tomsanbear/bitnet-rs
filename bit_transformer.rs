@@ -34,9 +34,7 @@ impl Transformer {
                 4,
                 0.1,
                 true,
-                true,
                 1e-6,
-                1.0,
                 vb.clone(),
             )?);
             ffn_layers.push(BitFeedForward::load(dim, ff_mult, vb.device())?);
