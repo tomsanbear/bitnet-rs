@@ -137,7 +137,6 @@ impl BitAttention {
         let x = x.reshape((x_dims.0, x_dims.1, x_dims.2 * x_dims.3))?;
 
         // Original source mentions the magneto paper, need to read on this and the impact
-        println!("{:?}", self.norm);
         let x = match self.norm {
             Some(ref norm) => norm.forward(&x)?,
             None => x,

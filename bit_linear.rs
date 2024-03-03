@@ -30,7 +30,8 @@ impl Module for Bitlinear {
         let gamma = self.weight.abs()?.mean_all()?; // 0 dimensional tensor
         let w_scaled = self.weight.broadcast_mul(&gamma)?; // 2 dimensional vector
         let w_quantized = sign(&w_scaled)?.mul(&w_scaled.abs()?.round()?.clamp(0u8, 1u8)?)?;
-        Linear::new(w_quantized, None).forward(&x)
+        let x = Linear::new(w_quantized, None).forward(&x)?;
+        Ok(x)
     }
 }
 
@@ -57,8 +58,6 @@ mod bitlinear_tests {
         let bl = super::Bitlinear::load(in_features, out_features, &device)?;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, 128), &device)?;
         let output = bl.forward(&input).unwrap();
-        println!("output: {}", output);
-
         let output_shape = output.shape().dims2()?;
 
         assert_eq!(output_shape.0, 10);

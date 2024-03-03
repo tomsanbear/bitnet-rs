@@ -59,7 +59,7 @@ impl Transformer {
     }
 }
 
-struct BitTransformer {
+pub struct BitTransformer {
     embedding: Embedding,
     transformer: Transformer,
     to_logits: Sequential,
@@ -77,7 +77,6 @@ impl BitTransformer {
         let t_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
         let e_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
         let embedding = embedding(num_tokens, dim, e_vb.pp("weight"))?;
-        println!("embedding: {:?}", embedding);
         let transformer = Transformer::new(num_tokens, dim, heads, depth, ff_mult, t_vb.clone())?;
         let to_logits = seq()
             .add(RmsNorm::load(1e-6, dim, t_vb.clone())?)
@@ -89,12 +88,9 @@ impl BitTransformer {
         })
     }
 
-    fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        println!("x: {:?}", x);
+    pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
         let x = self.embedding.forward(x)?;
-        println!("x: {:?}", x);
         let x = self.transformer.forward(&x)?;
-        println!("x: {:?}", x);
         let x = self.to_logits.forward(&x)?;
         Ok(x)
     }

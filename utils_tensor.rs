@@ -68,9 +68,6 @@ mod sign_tests {
 fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor> {
     let shape = mask.shape();
     let on_true = Tensor::new(on_true, on_false.device())?.broadcast_as(shape.dims())?;
-    println!("on_true: {:?}", on_true.shape().dims());
-    println!("on_false: {:?}", on_false.shape().dims());
-    println!("mask: {:?}", mask.shape().dims());
     let m = on_false.broadcast_mul(&mask.to_dtype(DType::F32)?)?;
     Ok(m)
 }
@@ -169,7 +166,6 @@ pub fn scaled_dot_product_gqa(
         true => {
             // Mask out the upper triangular portion of the attention matrix. This prevents
             // the model from attending to tokens in the future
-            println!("bq: {}, nq: {}, nk: {}", bq, nq, nk);
             let mask = Tensor::ones((bq, nq, nk), dtype, device)?;
             Some(mask)
         }
@@ -189,8 +185,6 @@ pub fn scaled_dot_product_gqa(
         }),
         None => None,
     };
-
-    println!("similarity: {:?}", similarity.shape().dims());
 
     let similarity = match mask {
         Some(mask) => masked_fill(&similarity, &mask, f32::NEG_INFINITY)?,
@@ -226,14 +220,11 @@ pub fn scaled_dot_product_gqa(
             // output: (b, n, h, d).
             // python code:
             // attn_weights = rearrange(attention, "b h n s -> b n s h")
-            println!("attention: {:?}", attention.shape().dims());
             let attn_weights = attention.permute([0, 2, 3, 1])?;
-            println!("attn_weights: {:?}", attn_weights.shape().dims());
             // if average_attn_weights:
             //   attn_weights = attn_weights.mean(dim=1)
             if average_attn_weights {
                 let attn_weights = attn_weights.mean_keepdim(1)?;
-                println!("attn_weights: {:?}", attn_weights.shape().dims());
                 Some(attn_weights)
             } else {
                 Some(attn_weights)
