@@ -1,10 +1,10 @@
 use crate::bit_transformer::BitTransformer;
 use anyhow::Result;
-use candle_core::{Device, Error, Tensor, D};
-use candle_nn::ops::softmax;
+use candle_core::{Device, Tensor, D};
+
 use candle_transformers::generation::LogitsProcessor;
 use rand::distributions::Distribution;
-use rand::{self, SeedableRng};
+use rand::{self};
 
 pub struct AutoregressiveWrapper {
     net: BitTransformer,
@@ -35,9 +35,9 @@ impl AutoregressiveWrapper {
         &mut self,
         start_tokens: &Tensor,
         seq_len: usize,
-        eos_token: Option<usize>,
+        _eos_token: Option<usize>,
         temperature: f64,
-        filter_thres: f32,
+        _filter_thres: f32,
     ) -> Result<Tensor> {
         let mut output = start_tokens.clone();
         let mut logits_processor = LogitsProcessor::new(self.seed, Some(temperature), None);

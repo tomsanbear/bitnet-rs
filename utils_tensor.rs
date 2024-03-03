@@ -67,7 +67,7 @@ mod sign_tests {
 // Mask the elements of a tensor based on a mask tensor
 fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor> {
     let shape = mask.shape();
-    let on_true = Tensor::new(on_true, on_false.device())?.broadcast_as(shape.dims())?;
+    let _on_true = Tensor::new(on_true, on_false.device())?.broadcast_as(shape.dims())?;
     let m = on_false.broadcast_mul(&mask.to_dtype(DType::F32)?)?;
     Ok(m)
 }
