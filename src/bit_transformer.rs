@@ -7,9 +7,6 @@ use anyhow::Result;
 use candle_core::{Device, Module, Tensor};
 use candle_nn::{embedding, linear, seq, Embedding, Sequential, VarBuilder};
 
-#[cfg(feature = "accelerate")]
-extern crate accelerate_src;
-
 pub struct Transformer {
     attn_layers: Vec<BitAttention>,
     ffn_layers: Vec<BitFeedForward>,
@@ -17,7 +14,6 @@ pub struct Transformer {
 
 impl Transformer {
     pub fn new(
-        _num_tokens: usize,
         dim: usize,
         heads: usize,
         depth: usize,
@@ -75,7 +71,7 @@ impl BitTransformer {
         let t_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
         let e_vb = VarBuilder::zeros(candle_core::DType::F32, &device.clone());
         let embedding = embedding(num_tokens, dim, e_vb.pp("weight"))?;
-        let transformer = Transformer::new(num_tokens, dim, heads, depth, ff_mult, t_vb.clone())?;
+        let transformer = Transformer::new(dim, heads, depth, ff_mult, t_vb.clone())?;
         let to_logits = seq()
             .add(RmsNorm::load(1e-6, dim, t_vb.clone())?)
             .add(linear(dim, num_tokens, e_vb.clone())?);
@@ -106,11 +102,11 @@ mod bitnet_transformer_tests {
     fn it_applies_forward_pass() -> Result<()> {
         let dtype = candle_core::DType::U32;
         let device = &device(false)?;
-        let mut t = BitTransformer::load(1024, 6, 20000, 8, 4, device)?;
-        let x = Tensor::ones((1, 1024), dtype, device)?;
+        let mut t = BitTransformer::load(128, 6, 20000, 8, 4, device)?;
+        let x = Tensor::ones((1, 128), dtype, device)?;
         let x = t.forward(&x)?;
 
-        assert_eq!(x.shape().dims(), &[1, 1024, 20000]);
+        assert_eq!(x.shape().dims(), &[1, 128, 20000]);
 
         Ok(())
     }

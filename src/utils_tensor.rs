@@ -250,7 +250,7 @@ mod scaled_dot_product_gqa_tests {
                     let device = device(true).unwrap();
                     let dtype = DType::F32;
                     let safetensor =
-                        safetensors::load("test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
+                        safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
 
                     let input_tensor_name = format!("{}_input", input);
                     let input_tensor = match safetensor.get(input_tensor_name.as_str()) {

@@ -27,9 +27,9 @@ impl Module for BitFeedForward {
 
 #[cfg(test)]
 mod bitffn_tests {
-    use candle_core::{Device, Module, Result, Tensor};
-
     use crate::utils_tensor::device;
+    use candle_core::{Device, Module, Result, Tensor};
+    use test::Bencher;
 
     #[test]
     fn it_loads() -> Result<()> {
@@ -65,6 +65,22 @@ mod bitffn_tests {
         assert_eq!(output_shape.0, 1);
         assert_eq!(output_shape.1, 10);
         assert_eq!(output_shape.2, dim);
+
+        Ok(())
+    }
+
+    #[bench]
+    fn bench_bit_linear(b: &mut Bencher) -> Result<()> {
+        let device = device(true).unwrap();
+        let dim = 16;
+        let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
+        let bff = super::BitFeedForward::load(dim, 4, &device)?;
+
+        b.iter(|| {
+            for _ in 1..100 {
+                bff.forward(&input).unwrap();
+            }
+        });
 
         Ok(())
     }

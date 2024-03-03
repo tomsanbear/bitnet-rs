@@ -30,16 +30,16 @@ impl Module for Bitlinear {
         let gamma = self.weight.abs()?.mean_all()?; // 0 dimensional tensor
         let w_scaled = self.weight.broadcast_mul(&gamma)?; // 2 dimensional vector
         let w_quantized = sign(&w_scaled)?.mul(&w_scaled.abs()?.round()?.clamp(0u8, 1u8)?)?;
-        let x = Linear::new(w_quantized, None).forward(&x)?;
+        let x: Tensor = Linear::new(w_quantized, None).forward(&x)?;
         Ok(x)
     }
 }
 
 #[cfg(test)]
 mod bitlinear_tests {
-    use candle_core::{Module, Result, Tensor};
-
     use crate::utils_tensor::device;
+    use candle_core::{Module, Result, Tensor};
+    use test::Bencher;
 
     #[test]
     fn it_loads_with_provided_options() -> Result<()> {
@@ -56,12 +56,29 @@ mod bitlinear_tests {
         let in_features = 128;
         let out_features = 64;
         let bl = super::Bitlinear::load(in_features, out_features, &device)?;
-        let input: Tensor = Tensor::randn(0f32, 1.0, (10, 128), &device)?;
+        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device)?;
         let output = bl.forward(&input).unwrap();
         let output_shape = output.shape().dims2()?;
 
         assert_eq!(output_shape.0, 10);
         assert_eq!(output_shape.1, 64);
+
+        Ok(())
+    }
+
+    #[bench]
+    fn bench_bit_linear(b: &mut Bencher) -> Result<()> {
+        let device = device(true).unwrap();
+        let in_features = 128;
+        let out_features = 64;
+        let bl = super::Bitlinear::load(in_features, out_features, &device)?;
+        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device)?;
+
+        b.iter(|| {
+            for _ in 1..100 {
+                bl.forward(&input).unwrap();
+            }
+        });
 
         Ok(())
     }

@@ -144,15 +144,17 @@ impl BitAttention {
 #[cfg(test)]
 mod bit_attention_tests {
     use crate::{bit_attention::BitAttention, utils_tensor::device};
-    use candle_core::{safetensors, Result};
+    use candle_core::{safetensors, Result, Tensor};
     use candle_nn::VarBuilder;
+    use test::Bencher;
 
     #[test]
     fn it_matches_python_snapshot() -> Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
-        let safetensor = safetensors::load("test_data/bit_attention_test.safetensors", &device)?;
+        let safetensor =
+            safetensors::load("src/test_data/bit_attention_test.safetensors", &device)?;
 
         let input_tensor = safetensor.get("input_small").unwrap();
         let expected_output_tensor = safetensor.get("output_small").unwrap();
@@ -174,7 +176,30 @@ mod bit_attention_tests {
         assert_eq!(output_tensor.shape(), expected_output_tensor.shape());
         assert_eq!(attn_weights.unwrap().shape(), expected_attn_weights.shape());
 
-        // TODO: need to provide a seed to compare actual numbers
+        Ok(())
+    }
+
+    #[bench]
+    fn bench_bit_attention(b: &mut Bencher) -> Result<()> {
+        let device = device(true).unwrap();
+        let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
+        let input = Tensor::randn(0.0f32, 1.0f32, (1, 10, 128), &device)?;
+        let bit_attention = BitAttention::load(128, 4, 2, 0.1, false, 1e-5, vb).unwrap();
+
+        b.iter(|| {
+            for _ in 1..100 {
+                bit_attention
+                    .forward(
+                        input.clone(),
+                        input.clone(),
+                        input.clone(),
+                        true,
+                        false,
+                        false,
+                    )
+                    .unwrap();
+            }
+        });
 
         Ok(())
     }

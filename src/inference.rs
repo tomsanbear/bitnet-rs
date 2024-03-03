@@ -58,14 +58,14 @@ mod inference_tests {
     fn test_inference() -> Result<()> {
         let device = device(false)?;
 
-        let net = BitTransformer::load(512, 8, 256, 8, 4, &device.clone()).unwrap();
+        let net = BitTransformer::load(128, 8, 256, 8, 4, &device.clone()).unwrap();
         let mut wrapper = AutoregressiveWrapper::new(net, 1024, device.clone());
 
         let start_tokens =
-            Tensor::ones((1, 256), candle_core::DType::U32, &device.clone()).unwrap();
+            Tensor::ones((1, 128), candle_core::DType::U32, &device.clone()).unwrap();
         let output = wrapper.generate(&start_tokens, 2, None, 1.0, 0.0).unwrap();
 
-        assert_eq!(output.shape().dims(), &[1, 258]);
+        assert_eq!(output.shape().dims(), &[1, 130]);
         Ok(())
     }
 }
