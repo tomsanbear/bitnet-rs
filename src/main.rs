@@ -96,7 +96,7 @@ fn main() -> Result<()> {
 
     match &args.task {
         Some(Task::Inference(_cmd)) => inference::run()?,
-        Some(Task::Train(cmd)) => training::run(&cmd, &args)?,
+        Some(Task::Train(cmd)) => training::run(cmd, &args)?,
         _ => return Err(anyhow!("No task specified")),
     }
     Ok(())
