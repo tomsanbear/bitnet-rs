@@ -83,7 +83,7 @@ impl BitTransformer {
     }
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        let x = self.embedding.forward(&x)?;
+        let x = self.embedding.forward(x)?;
         let x = self.transformer.forward(&x)?;
         let x = self.to_logits.forward(&x)?;
         Ok(x)

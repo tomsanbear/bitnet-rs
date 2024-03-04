@@ -72,7 +72,7 @@ fn main() -> Result<()> {
     };
 
     // Run Training
-    if (args.train) {
+    if args.train {
         train()?;
         return Ok(());
     }

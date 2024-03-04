@@ -2,7 +2,6 @@ use crate::bit_transformer::BitTransformer;
 use anyhow::Result;
 use candle_core::{Device, Tensor, D};
 
-use candle_nn::loss::cross_entropy;
 use candle_transformers::generation::LogitsProcessor;
 
 pub struct AutoregressiveWrapper {
@@ -46,7 +45,7 @@ impl AutoregressiveWrapper {
     }
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        self.net.forward(&x)
+        self.net.forward(x)
     }
 }
 
