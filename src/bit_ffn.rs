@@ -12,9 +12,9 @@ impl BitFeedForward {
     pub fn load(dim: usize, ff_mult: usize, vb: VarBuilder) -> candle_core::Result<Self> {
         let hidden_dim = dim * ff_mult;
         let layer = seq()
-            .add(Bitlinear::load(dim, hidden_dim, vb.device())?)
+            .add(Bitlinear::load(dim, hidden_dim, vb.pp("first"))?)
             .add(Tensor::gelu)
-            .add(Bitlinear::load(hidden_dim, dim, vb.device())?);
+            .add(Bitlinear::load(hidden_dim, dim, vb.pp("second"))?);
         Ok(Self { layer })
     }
 }

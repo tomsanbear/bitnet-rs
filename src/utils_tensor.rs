@@ -83,8 +83,6 @@ pub fn scaled_dot_product_gqa(
     average_attn_weights: bool,
     force_grouped: bool,
     dropout: f32,
-    device: &Device,
-    dtype: DType,
 ) -> Result<(Tensor, Option<Tensor>), anyhow::Error> {
     if query.dims().len() != 4 || key.dims().len() != 4 || value.dims().len() != 4 {
         return Err(anyhow!("Input tensors must have 4 dimensions"));
@@ -165,7 +163,7 @@ pub fn scaled_dot_product_gqa(
         true => {
             // Mask out the upper triangular portion of the attention matrix. This prevents
             // the model from attending to tokens in the future
-            let mask = Tensor::ones((bq, nq, nk), dtype, device)?;
+            let mask = Tensor::ones((bq, nq, nk), query.dtype(), query.device())?;
             Some(mask)
         }
         false => None,
@@ -280,8 +278,6 @@ mod scaled_dot_product_gqa_tests {
                         true,
                         true,
                         0.0,
-                        &device,
-                        dtype,
                     ).unwrap();
                     let attn_weights = attn_weights.unwrap();
 
@@ -338,8 +334,6 @@ mod scaled_dot_product_gqa_tests {
                     true,
                     true,
                     0.0,
-                    &device,
-                    dtype,
                 )
                 .unwrap();
             }

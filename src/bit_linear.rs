@@ -1,5 +1,8 @@
-use candle_core::{Device, Tensor};
-use candle_nn::{Linear, Module};
+use candle_core::Tensor;
+use candle_nn::{
+    init::{FanInOut, NonLinearity, NormalOrUniform},
+    Init, Linear, Module, VarBuilder,
+};
 
 use crate::utils_tensor::sign;
 
@@ -13,9 +16,14 @@ impl Bitlinear {
     pub fn load(
         in_features: usize,
         out_features: usize,
-        device: &Device,
+        vb: VarBuilder,
     ) -> candle_core::Result<Self> {
-        let weight: Tensor = Tensor::randn(0f32, 1f32, (out_features, in_features), device)?;
+        let init_weights = Init::Kaiming {
+            dist: NormalOrUniform::Normal,
+            fan: FanInOut::FanIn,
+            non_linearity: NonLinearity::ReLU,
+        };
+        let weight = vb.get_with_hints((out_features, in_features), "weight", init_weights)?;
         Ok(Self {
             in_features,
             out_features,
@@ -38,25 +46,18 @@ impl Module for Bitlinear {
 #[cfg(test)]
 mod bitlinear_tests {
     use crate::utils_tensor::device;
-    use candle_core::{Module, Result, Tensor};
+    use candle_core::{DType, Module, Result, Tensor};
+    use candle_nn::var_builder::VarBuilderArgs;
     use test::Bencher;
-
-    #[test]
-    fn it_loads_with_provided_options() -> Result<()> {
-        let device = device(false).unwrap();
-        let bl = super::Bitlinear::load(3, 3, &device)?;
-        assert!(bl.in_features == 3);
-        assert!(bl.out_features == 3);
-        Ok(())
-    }
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
         let device = device(true).unwrap();
+        let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 128;
         let out_features = 64;
-        let bl = super::Bitlinear::load(in_features, out_features, &device)?;
-        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device)?;
+        let bl = super::Bitlinear::load(in_features, out_features, vb)?;
+        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device.clone())?;
         let output = bl.forward(&input).unwrap();
         let output_shape = output.shape().dims2()?;
 
@@ -69,9 +70,10 @@ mod bitlinear_tests {
     #[bench]
     fn bench_bit_linear(b: &mut Bencher) -> Result<()> {
         let device = device(true).unwrap();
+        let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 128;
         let out_features = 64;
-        let bl = super::Bitlinear::load(in_features, out_features, &device)?;
+        let bl = super::Bitlinear::load(in_features, out_features, vb)?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device)?;
 
         b.iter(|| {

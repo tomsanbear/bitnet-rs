@@ -1,6 +1,6 @@
 use crate::{bit_linear::Bitlinear, utils_tensor::scaled_dot_product_gqa};
 use anyhow::{anyhow, Result};
-use candle_core::{DType, Device, Tensor};
+use candle_core::Tensor;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
 
 pub struct BitAttention {
@@ -12,8 +12,6 @@ pub struct BitAttention {
     dropout: f32,
     query_heads: usize,
     kv_heads: usize,
-    device: Device,
-    dtype: DType,
 }
 
 impl BitAttention {
@@ -26,7 +24,6 @@ impl BitAttention {
         layer_norm_eps: f64,
         vb: VarBuilder,
     ) -> Result<Self> {
-        let vb = VarBuilder::zeros(DType::F32, vb.device());
         let kv_embed_dim = embed_dim / query_heads * kv_heads;
         let head_dim = embed_dim / query_heads;
         if query_heads % kv_heads != 0 {
@@ -45,9 +42,9 @@ impl BitAttention {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
         }
 
-        let q_proj = Bitlinear::load(embed_dim, embed_dim, vb.device())?;
-        let k_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.device())?;
-        let v_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.device())?;
+        let q_proj = Bitlinear::load(embed_dim, embed_dim, vb.pp("q_proj"))?;
+        let k_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.pp("k_proj"))?;
+        let v_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.pp("v_proj"))?;
 
         let norm = match layer_norm_enabled {
             true => {
@@ -56,12 +53,12 @@ impl BitAttention {
                     ..LayerNormConfig::default()
                 };
                 // TODO: need a way to avoid converting to and from f32
-                Some(layer_norm(kv_embed_dim, config, vb.clone())?)
+                Some(layer_norm(kv_embed_dim, config, vb.pp("norm"))?)
             }
             false => None,
         };
 
-        let out_proj = Bitlinear::load(kv_embed_dim, embed_dim, vb.device())?;
+        let out_proj = Bitlinear::load(kv_embed_dim, embed_dim, vb.pp("out_proj"))?;
 
         // TODO: Original project makes a call to reset parameters, investigate why
 
@@ -74,8 +71,6 @@ impl BitAttention {
             kv_heads,
             out_proj,
             dropout,
-            device: vb.device().clone(),
-            dtype: vb.dtype(),
         })
     }
 
@@ -120,8 +115,6 @@ impl BitAttention {
             average_attn_weights,
             false,
             self.dropout,
-            &self.device,
-            self.dtype,
         )?;
 
         // x = rearrange(x, "b n h d -> b n (h d)")

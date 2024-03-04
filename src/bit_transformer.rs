@@ -41,7 +41,7 @@ impl BitTransformer {
 
         let to_logits = seq()
             .add(RmsNorm::load(1e-6, cfg.dim, vb.pp("model.norm"))?)
-            .add(linear(cfg.dim, cfg.vocab_size, vb)?);
+            .add(linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?);
 
         Ok(Self {
             blocks,
