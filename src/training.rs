@@ -1,17 +1,11 @@
-use std::{
-    fs::File,
-    io::{BufRead, BufReader},
-};
-
-use anyhow::Result;
-use candle_core::{Device, Error as E};
-use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
-use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarMap};
-use hf_hub::api::sync::Api;
-
 use crate::{
     bit_transformer::BitTransformer, inference::AutoregressiveWrapper, utils_tensor::device,
 };
+use anyhow::Result;
+use candle_core::Device;
+use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarMap};
+use kdam::tqdm;
 
 fn valid_loss(
     seq_len: usize,
@@ -43,19 +37,10 @@ pub fn train() -> Result<()> {
     const DEPTH: usize = 8;
     const NUM_HEADS: usize = 8;
     const FF_MULT: usize = 4;
-    const NUM_TOKENS: usize = 256;
+    const NUM_TOKENS: usize = 10000;
 
     // Setup device
     let device = device(false)?;
-
-    // Setup tokenizer
-    let tokenizer = {
-        let api = hf_hub::api::sync::Api::new()?;
-        let api = api.model("hf-internal-testing/llama-tokenizer".to_string());
-        let api = api.get("tokenizer.json")?;
-        let tokenizer = tokenizers::Tokenizer::from_file(api).unwrap();
-        tokenizer
-    };
 
     // Get the datasets
     let dataset = {
@@ -79,21 +64,18 @@ pub fn train() -> Result<()> {
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(BATCH_SIZE);
 
     // Training loop
-    for (batch_index, batch) in batch_iter.enumerate() {
+    for (batch_index, batch) in tqdm!(batch_iter.enumerate()) {
         let (inp, tgt) = batch?;
-        println!("inp: {:?}", inp.shape());
-        println!("tgt: {:?}", tgt.shape());
         let logits = model.forward(&inp)?;
         let loss = candle_nn::loss::cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         opt.backward_step(&loss)?;
 
         if batch_index > 0 && batch_index % 100 == 0 {
-            // TODO: Add a way to deactivate the backprop graph tracking when computing the
-            // validation loss.
             let loss = valid_loss(SEQ_LEN, BATCH_SIZE, &dataset, &mut model, &device)?;
             println!("{batch_index} {loss}");
         }
-        if batch_index > 0 && batch_index % 1000 == 0 {
+        if batch_index > 0 && batch_index % 10 == 0 {
+            // TODO: model is not actually using the varbuilder, need to update the model to use it
             varmap.save("checkpoint.safetensors")?
         }
     }

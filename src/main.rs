@@ -33,6 +33,10 @@ struct Args {
     #[arg(long)]
     tracing: bool,
 
+    /// Run training program
+    #[arg(long, default_value = "false")]
+    train: bool,
+
     /// The number of tokens in the vocabulary.
     #[arg(long, default_value = "10000")]
     num_tokens: usize,
@@ -68,9 +72,12 @@ fn main() -> Result<()> {
     };
 
     // Run Training
+    if (args.train) {
+        train()?;
+        return Ok(());
+    }
 
-    train()?;
-
+    // Run inference
     let device = device(false)?;
     let net = BitTransformer::load(
         args.dim,
@@ -81,10 +88,6 @@ fn main() -> Result<()> {
         &device,
     )?;
     let mut wrapper = AutoregressiveWrapper::new(0, net, device.clone());
-
-    // Run the model forward to train
-
-    // Generate some tokens
 
     let start_tokens = Tensor::ones((1, 256), candle_core::DType::U32, &device.clone()).unwrap();
 

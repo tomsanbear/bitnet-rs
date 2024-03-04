@@ -46,17 +46,7 @@ impl AutoregressiveWrapper {
     }
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
-        // Original python implementation
-        // x_inp, x_labels = x[:, :-1], x[:, 1:]
-        // logits = self.net(x_inp, **kwargs)
-        let x_inp = x.index_select(&Tensor::new(0f32, &self.device)?, D::Minus1)?;
-        let x_labels = x.index_select(&Tensor::new(1f32, &self.device)?, D::Minus1)?;
-        let logits = self.net.forward(&x_inp)?;
-        // rearrange logits "b c n -> b n c"
-        let logits = logits.permute((0, 2, 1))?;
-        // return F.cross_entropy(logits, x_labels)
-        let x = cross_entropy(&logits, &x_labels)?;
-        Ok(x)
+        self.net.forward(&x)
     }
 }
 

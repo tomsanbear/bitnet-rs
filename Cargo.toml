@@ -23,6 +23,7 @@ tracing-subscriber = "0.3.18"
 candle-flash-attn = { version = "0.3.2", optional = true }
 rand = "0.8.5"
 candle-datasets = "0.4.1"
+kdam = "0.5.1"
 
 [features]
 cuda = ["candle-core/cuda", "candle-nn/cuda"]
