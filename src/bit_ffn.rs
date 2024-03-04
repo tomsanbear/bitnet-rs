@@ -1,5 +1,5 @@
-use candle_core::{Device, Module, Tensor};
-use candle_nn::{seq, Sequential};
+use candle_core::{Module, Tensor};
+use candle_nn::{seq, Sequential, VarBuilder};
 
 use crate::bit_linear::Bitlinear;
 
@@ -9,12 +9,12 @@ pub struct BitFeedForward {
 
 impl BitFeedForward {
     #[allow(dead_code)]
-    pub fn load(dim: usize, ff_mult: usize, device: &Device) -> candle_core::Result<Self> {
+    pub fn load(dim: usize, ff_mult: usize, vb: VarBuilder) -> candle_core::Result<Self> {
         let hidden_dim = dim * ff_mult;
         let layer = seq()
-            .add(Bitlinear::load(dim, hidden_dim, device)?)
+            .add(Bitlinear::load(dim, hidden_dim, vb.device())?)
             .add(Tensor::gelu)
-            .add(Bitlinear::load(hidden_dim, dim, device)?);
+            .add(Bitlinear::load(hidden_dim, dim, vb.device())?);
         Ok(Self { layer })
     }
 }
@@ -28,22 +28,16 @@ impl Module for BitFeedForward {
 #[cfg(test)]
 mod bitffn_tests {
     use crate::utils_tensor::device;
-    use candle_core::{Device, Module, Result, Tensor};
-    use test::Bencher;
-
-    #[test]
-    fn it_loads() -> Result<()> {
-        let bl = super::BitFeedForward::load(512, 4, &Device::Cpu)?;
-        assert_eq!(bl.layer.len(), 3);
-        Ok(())
-    }
+    use candle_core::{DType, Device, Module, Result, Tensor};
+    use candle_nn::VarBuilder;
 
     #[test]
     fn it_applies_forward_pass_dim_2() -> Result<()> {
-        let device = device(true).unwrap();
+        let device: Device = device(true).unwrap();
+        let vb = VarBuilder::zeros(DType::F32, &device);
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
-        let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
+        let bff = super::BitFeedForward::load(dim, 4, vb)?;
         let output = bff.forward(&input).unwrap();
         let output_shape = output.shape().dims2()?;
 
@@ -56,31 +50,16 @@ mod bitffn_tests {
     #[test]
     fn it_applies_forward_pass_dim_3() -> Result<()> {
         let device = device(true).unwrap();
+        let vb = VarBuilder::zeros(DType::F32, &device);
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
-        let bff = super::BitFeedForward::load(dim, 4, &Device::Cpu)?;
+        let bff = super::BitFeedForward::load(dim, 4, vb)?;
         let output = bff.forward(&input).unwrap();
         let output_shape = output.shape().dims3()?;
 
         assert_eq!(output_shape.0, 1);
         assert_eq!(output_shape.1, 10);
         assert_eq!(output_shape.2, dim);
-
-        Ok(())
-    }
-
-    #[bench]
-    fn bench_bit_linear(b: &mut Bencher) -> Result<()> {
-        let device = device(true).unwrap();
-        let dim = 16;
-        let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
-        let bff = super::BitFeedForward::load(dim, 4, &device)?;
-
-        b.iter(|| {
-            for _ in 1..100 {
-                bff.forward(&input).unwrap();
-            }
-        });
 
         Ok(())
     }

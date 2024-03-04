@@ -1,17 +1,16 @@
-use crate::{
-    bit_transformer::BitTransformer, inference::AutoregressiveWrapper, utils_tensor::device,
-};
+use crate::config::Config;
+use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
-use candle_core::Device;
+use candle_core::{DType, Device};
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
-use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarMap};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use kdam::tqdm;
 
 fn valid_loss(
     seq_len: usize,
     batch_size: usize,
     dataset: &Dataset,
-    model: &mut AutoregressiveWrapper,
+    model: &mut BitTransformer,
     device: &Device,
 ) -> Result<f64> {
     let iter = DatasetRandomIter::new(dataset, true, seq_len, device.clone());
@@ -28,20 +27,13 @@ fn valid_loss(
     Ok(sum_ce / cnt as f64)
 }
 
-pub fn train() -> Result<()> {
-    // Training parameters
-    const MAX_STEPS: usize = 10000;
-    const BATCH_SIZE: usize = 4;
-    const LEARNING_RATE: f64 = 2e-4;
-    const SEQ_LEN: usize = 1024;
-    const DIMS: usize = 512;
-    const DEPTH: usize = 8;
-    const NUM_HEADS: usize = 8;
-    const FF_MULT: usize = 4;
-    const NUM_TOKENS: usize = 10000;
-
+pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     // Setup device
-    let device = device(false)?;
+    let device = device(common_args.cpu)?;
+
+    // Setup varbuilder
+    let varmap = VarMap::new();
+    let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
 
     // Get the datasets
     let dataset = {
@@ -51,23 +43,25 @@ pub fn train() -> Result<()> {
     };
 
     // Setup the model
-    let model = BitTransformer::load(DIMS, DEPTH, NUM_TOKENS, NUM_HEADS, FF_MULT, &device)?;
-    let mut model = AutoregressiveWrapper::new(1, model, device.clone());
+    let config = Config::default();
+    let mut model = BitTransformer::load(config, vb)?;
 
     // Setup the optimizer
-    let varmap = VarMap::new();
     let params = ParamsAdamW {
-        lr: LEARNING_RATE,
+        lr: args.learning_rate,
         ..Default::default()
     };
     let mut opt = AdamW::new(varmap.all_vars(), params)?;
-    let iter = DatasetRandomIter::new(&dataset, false, SEQ_LEN, device.clone());
-    let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(BATCH_SIZE);
+    let iter = DatasetRandomIter::new(&dataset, false, args.seq_len, device.clone());
+    let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(args.batch_size);
 
     // Training loop
-    for (batch_index, batch) in tqdm!(batch_iter.enumerate(), total = MAX_STEPS, desc = "Training")
-    {
-        if batch_index > MAX_STEPS {
+    for (batch_index, batch) in tqdm!(
+        batch_iter.enumerate(),
+        total = args.max_steps,
+        desc = "Training"
+    ) {
+        if batch_index > args.max_steps {
             break;
         }
         let (inp, tgt) = batch?;
@@ -76,7 +70,7 @@ pub fn train() -> Result<()> {
         opt.backward_step(&loss)?;
 
         if batch_index > 0 && batch_index % 100 == 0 {
-            let loss = valid_loss(SEQ_LEN, BATCH_SIZE, &dataset, &mut model, &device)?;
+            let loss = valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
             println!("{batch_index} {loss}");
         }
         if batch_index > 0 && batch_index % 100 == 0 {

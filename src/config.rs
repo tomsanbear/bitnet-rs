@@ -2,8 +2,21 @@
 pub struct Config {
     pub(crate) dim: usize,
     pub(crate) depth: usize,
-    pub(crate) num_tokens: usize,
+    pub(crate) vocab_size: usize,
     pub(crate) heads: usize,
     pub(crate) ff_mult: usize,
     pub(crate) layer_norm_eps: f64,
+}
+
+impl Config {
+    pub fn default() -> Self {
+        Self {
+            dim: 64,
+            depth: 8,
+            vocab_size: 32000,
+            heads: 8,
+            ff_mult: 12,
+            layer_norm_eps: 1e-6,
+        }
+    }
 }
