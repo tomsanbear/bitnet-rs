@@ -247,7 +247,6 @@ mod scaled_dot_product_gqa_tests {
                     let input = $value;
 
                     let device = device(true).unwrap();
-                    let dtype = DType::F32;
                     let safetensor =
                         safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
 
@@ -314,7 +313,6 @@ mod scaled_dot_product_gqa_tests {
     #[bench]
     fn bench_scaled_dot_product_gqa(b: &mut Bencher) -> Result<()> {
         let device = device(true).unwrap();
-        let dtype = DType::F32;
         let safetensor =
             safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
 
