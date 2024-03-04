@@ -1,4 +1,7 @@
-use crate::{bit_linear::Bitlinear, utils_tensor::scaled_dot_product_gqa};
+use crate::{
+    bit_linear::Bitlinear,
+    utils_tensor::{scaled_dot_product_gqa, ScaledDotProductCfg},
+};
 use anyhow::{anyhow, Result};
 use candle_core::Tensor;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
@@ -110,11 +113,13 @@ impl BitAttention {
             q,
             k,
             v,
-            is_causal,
-            need_weights,
-            average_attn_weights,
-            false,
-            self.dropout,
+            ScaledDotProductCfg {
+                is_causal,
+                need_weights,
+                average_attn_weights,
+                force_grouped: false,
+                dropout: self.dropout,
+            },
         )?;
 
         // x = rearrange(x, "b n h d -> b n (h d)")

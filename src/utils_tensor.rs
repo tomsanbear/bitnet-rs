@@ -72,17 +72,21 @@ fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor>
     Ok(m)
 }
 
+pub struct ScaledDotProductCfg {
+    pub is_causal: bool,
+    pub need_weights: bool,
+    pub average_attn_weights: bool,
+    pub force_grouped: bool,
+    pub dropout: f32,
+}
+
 // Scaled dot-product attention with grouped query and key heads.
 // Original implementation: https://github.com/kyegomez/BitNet/blob/2fe67c30f2b47fb510b39f7a4cffb79fad354838/bitnet/bit_attention.py#L10
 pub fn scaled_dot_product_gqa(
     query: Tensor, // (b, n, h, d)
     key: Tensor,   // (b, s, h, d)
     value: Tensor, // (b, s, h, d)
-    is_causal: bool,
-    need_weights: bool,
-    average_attn_weights: bool,
-    force_grouped: bool,
-    dropout: f32,
+    cfg: ScaledDotProductCfg,
 ) -> Result<(Tensor, Option<Tensor>), anyhow::Error> {
     if query.dims().len() != 4 || key.dims().len() != 4 || value.dims().len() != 4 {
         return Err(anyhow!("Input tensors must have 4 dimensions"));
@@ -129,7 +133,7 @@ pub fn scaled_dot_product_gqa(
     let query = (query / scale)?;
     let num_head_groups = hq / hk;
 
-    let similarity = match num_head_groups > 1 || force_grouped {
+    let similarity = match num_head_groups > 1 || cfg.force_grouped {
         true => {
             // query = rearrange(query, "b (h g) n d -> b g h n d", g=num_head_groups)
             // similarity = einsum(query, key, "b g h n d, b h s d -> b h n s")
@@ -159,7 +163,7 @@ pub fn scaled_dot_product_gqa(
     }?;
 
     // Apply mask if causal attention is required
-    let mask = match is_causal {
+    let mask = match cfg.is_causal {
         true => {
             // Mask out the upper triangular portion of the attention matrix. This prevents
             // the model from attending to tokens in the future
@@ -192,11 +196,11 @@ pub fn scaled_dot_product_gqa(
     let attention = softmax(&(similarity / scale)?, D::Minus1)?;
 
     // apply dropout
-    let attention = match dropout > 0.0 {
+    let attention = match cfg.dropout > 0.0 {
         true => {
             // Original python code:
             // attention = F.dropout(attention, p=dropout, training=self.training)
-            Dropout::new(dropout).forward(&attention, false)?
+            Dropout::new(cfg.dropout).forward(&attention, false)?
         }
         false => attention,
     };
@@ -209,7 +213,7 @@ pub fn scaled_dot_product_gqa(
     // out = rearrange(out, "b h n d -> b n h d")
     let out = out.permute([0, 2, 1, 3])?;
 
-    let attn_weights = match need_weights {
+    let attn_weights = match cfg.need_weights {
         false => None,
         true => {
             // Move the sequence dimensions back to positions 1, 2.  Move the head dimension
@@ -220,7 +224,7 @@ pub fn scaled_dot_product_gqa(
             let attn_weights = attention.permute([0, 2, 3, 1])?;
             // if average_attn_weights:
             //   attn_weights = attn_weights.mean(dim=1)
-            if average_attn_weights {
+            if cfg.average_attn_weights {
                 let attn_weights = attn_weights.mean_keepdim(1)?;
                 Some(attn_weights)
             } else {
@@ -234,9 +238,9 @@ pub fn scaled_dot_product_gqa(
 
 #[cfg(test)]
 mod scaled_dot_product_gqa_tests {
-    use crate::utils_tensor::{device, scaled_dot_product_gqa};
+    use crate::utils_tensor::{device, scaled_dot_product_gqa, ScaledDotProductCfg};
     use anyhow::Result;
-    use candle_core::{safetensors, DType};
+    use candle_core::safetensors;
     use test::Bencher;
 
     macro_rules! python_snapshot_tests {
@@ -268,16 +272,13 @@ mod scaled_dot_product_gqa_tests {
                         None => panic!("Output tensor not found"),
                     };
 
-                    let (out, attn_weights) = scaled_dot_product_gqa(
-                        input_tensor.clone(),
-                        input_tensor.clone(),
-                        input_tensor.clone(),
-                        true,
-                        true,
-                        true,
-                        true,
-                        0.0,
-                    ).unwrap();
+                    let (out, attn_weights) = scaled_dot_product_gqa(input_tensor.clone(), input_tensor.clone(), input_tensor.clone(), ScaledDotProductCfg {
+                        is_causal: true,
+                        need_weights: true,
+                        average_attn_weights: true,
+                        force_grouped: true,
+                        dropout: 0.0,
+                    }).unwrap();
                     let attn_weights = attn_weights.unwrap();
 
                     assert_eq!(
@@ -327,11 +328,13 @@ mod scaled_dot_product_gqa_tests {
                     input_tensor.clone(),
                     input_tensor.clone(),
                     input_tensor.clone(),
-                    true,
-                    true,
-                    true,
-                    true,
-                    0.0,
+                    ScaledDotProductCfg {
+                        is_causal: true,
+                        need_weights: true,
+                        average_attn_weights: true,
+                        force_grouped: true,
+                        dropout: 0.0,
+                    },
                 )
                 .unwrap();
             }
