@@ -18,7 +18,7 @@ fn valid_loss(
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(batch_size);
     let mut sum_ce = 0f64;
     let mut cnt = 0usize;
-    for inp_tgt in batch_iter.take(50) {
+    for inp_tgt in tqdm!(batch_iter.take(50)) {
         let (inp, tgt) = inp_tgt?;
         let logits = model.forward(&inp)?;
         let loss = candle_nn::loss::cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
@@ -30,6 +30,7 @@ fn valid_loss(
 
 pub fn train() -> Result<()> {
     // Training parameters
+    const MAX_STEPS: usize = 10000;
     const BATCH_SIZE: usize = 4;
     const LEARNING_RATE: f64 = 2e-4;
     const SEQ_LEN: usize = 1024;
@@ -64,7 +65,11 @@ pub fn train() -> Result<()> {
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(BATCH_SIZE);
 
     // Training loop
-    for (batch_index, batch) in tqdm!(batch_iter.enumerate()) {
+    for (batch_index, batch) in tqdm!(batch_iter.enumerate(), total = MAX_STEPS, desc = "Training")
+    {
+        if batch_index > MAX_STEPS {
+            break;
+        }
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = candle_nn::loss::cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
@@ -74,7 +79,7 @@ pub fn train() -> Result<()> {
             let loss = valid_loss(SEQ_LEN, BATCH_SIZE, &dataset, &mut model, &device)?;
             println!("{batch_index} {loss}");
         }
-        if batch_index > 0 && batch_index % 10 == 0 {
+        if batch_index > 0 && batch_index % 100 == 0 {
             // TODO: model is not actually using the varbuilder, need to update the model to use it
             varmap.save("checkpoint.safetensors")?
         }
