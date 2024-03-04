@@ -70,35 +70,16 @@ mod bitnet_transformer_tests {
     use anyhow::Result;
     use candle_core::{DType, Tensor};
     use candle_nn::VarBuilder;
-    use test::Bencher;
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
-        let dtype: DType = candle_core::DType::U32;
         let device = &device(false)?;
-        let vb = VarBuilder::zeros(dtype, device);
+        let vb = VarBuilder::zeros(DType::F32, device);
         let mut t = BitTransformer::load(Config::default(), vb)?;
-        let x = Tensor::ones((1, 128), dtype, device)?;
+        let x = Tensor::ones((1, 128), DType::U32, device)?;
         let x = t.forward(&x)?;
 
-        assert_eq!(x.shape().dims(), &[1, 128, 20000]);
-
-        Ok(())
-    }
-
-    #[bench]
-    fn bench_bit_transformer(b: &mut Bencher) -> Result<()> {
-        let device = &device(false)?;
-        let dtype: DType = candle_core::DType::U32;
-
-        b.iter(|| {
-            for _ in 1..10 {
-                let vb = VarBuilder::zeros(dtype, device);
-                let mut t = BitTransformer::load(Config::default(), vb).unwrap();
-                let x = Tensor::ones((1, 128), DType::U32, device).unwrap();
-                t.forward(&x).unwrap();
-            }
-        });
+        assert_eq!(x.shape().dims(), &[1, 128, 32000]);
 
         Ok(())
     }
