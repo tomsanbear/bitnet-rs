@@ -6,6 +6,16 @@ use anyhow::{anyhow, Result};
 use candle_core::Tensor;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
 
+pub struct BitAttentionCfg {
+    pub embed_dim: usize,
+    pub query_heads: usize,
+    pub kv_heads: usize,
+    pub dropout: f32,
+    pub layer_norm_enabled: bool,
+    pub layer_norm_eps: f64,
+    pub bit_attention_eps: f64,
+}
+
 pub struct BitAttention {
     q_proj: Bitlinear,
     k_proj: Bitlinear,
@@ -18,24 +28,16 @@ pub struct BitAttention {
 }
 
 impl BitAttention {
-    pub fn load(
-        embed_dim: usize,
-        query_heads: usize,
-        kv_heads: usize,
-        dropout: f32,
-        layer_norm_enabled: bool,
-        layer_norm_eps: f64,
-        vb: VarBuilder,
-    ) -> Result<Self> {
-        let kv_embed_dim = embed_dim / query_heads * kv_heads;
-        let head_dim = embed_dim / query_heads;
-        if query_heads % kv_heads != 0 {
+    pub fn load(cfg: BitAttentionCfg, vb: VarBuilder) -> Result<Self> {
+        let kv_embed_dim = cfg.embed_dim / cfg.query_heads * cfg.kv_heads;
+        let head_dim = cfg.embed_dim / cfg.query_heads;
+        if cfg.query_heads % cfg.kv_heads != 0 {
             return Err(anyhow!("query_heads must be divisible by kv_heads"));
         }
-        if (embed_dim % query_heads) != 0 {
+        if (cfg.embed_dim % cfg.query_heads) != 0 {
             return Err(anyhow!("embed_dim must be divisible by query_heads"));
         }
-        if (embed_dim % kv_heads) != 0 {
+        if (cfg.embed_dim % cfg.kv_heads) != 0 {
             return Err(anyhow!("embed_dim must be divisible by kv_heads"));
         }
         if head_dim % 8 != 0 {
@@ -45,35 +47,32 @@ impl BitAttention {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
         }
 
-        let q_proj = Bitlinear::load(embed_dim, embed_dim, vb.pp("q_proj"))?;
-        let k_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.pp("k_proj"))?;
-        let v_proj = Bitlinear::load(embed_dim, kv_embed_dim, vb.pp("v_proj"))?;
+        let q_proj = Bitlinear::load(cfg.embed_dim, cfg.embed_dim, 1, vb.pp("q_proj"))?;
+        let k_proj = Bitlinear::load(cfg.embed_dim, kv_embed_dim, 1, vb.pp("k_proj"))?;
+        let v_proj = Bitlinear::load(cfg.embed_dim, kv_embed_dim, 1, vb.pp("v_proj"))?;
 
-        let norm = match layer_norm_enabled {
+        let norm = match cfg.layer_norm_enabled {
             true => {
                 let config = LayerNormConfig {
-                    eps: layer_norm_eps,
+                    eps: cfg.layer_norm_eps,
                     ..LayerNormConfig::default()
                 };
-                // TODO: need a way to avoid converting to and from f32
                 Some(layer_norm(kv_embed_dim, config, vb.pp("norm"))?)
             }
             false => None,
         };
 
-        let out_proj = Bitlinear::load(kv_embed_dim, embed_dim, vb.pp("out_proj"))?;
-
-        // TODO: Original project makes a call to reset parameters, investigate why
+        let out_proj = Bitlinear::load(kv_embed_dim, cfg.embed_dim, 1, vb.pp("out_proj"))?;
 
         Ok(BitAttention {
             q_proj,
             k_proj,
             v_proj,
             norm,
-            query_heads,
-            kv_heads,
+            query_heads: cfg.query_heads,
+            kv_heads: cfg.kv_heads,
             out_proj,
-            dropout,
+            dropout: cfg.dropout,
         })
     }
 
@@ -141,10 +140,23 @@ impl BitAttention {
 
 #[cfg(test)]
 mod bit_attention_tests {
-    use crate::{bit_attention::BitAttention, utils_tensor::device};
+    use crate::{
+        bit_attention::{BitAttention, BitAttentionCfg},
+        utils_tensor::device,
+    };
     use candle_core::{safetensors, Result, Tensor};
     use candle_nn::VarBuilder;
     use test::Bencher;
+
+    const cfg: BitAttentionCfg = BitAttentionCfg {
+        embed_dim: 512,
+        kv_heads: 8,
+        query_heads: 4,
+        dropout: 0.1,
+        layer_norm_enabled: false,
+        bit_attention_eps: 1e-5,
+        layer_norm_eps: 1e-5,
+    };
 
     #[test]
     fn it_matches_python_snapshot() -> Result<()> {
@@ -158,7 +170,7 @@ mod bit_attention_tests {
         let expected_output_tensor = safetensor.get("output_small").unwrap();
         let expected_attn_weights = safetensor.get("attn_weights_small").unwrap();
 
-        let bit_attention = BitAttention::load(512, 8, 4, 0.1, false, 1e-5, vb).unwrap();
+        let bit_attention = BitAttention::load(cfg, vb).unwrap();
 
         let (output_tensor, attn_weights) = bit_attention
             .forward(
@@ -182,7 +194,7 @@ mod bit_attention_tests {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
         let input = Tensor::randn(0.0f32, 1.0f32, (1, 10, 128), &device)?;
-        let bit_attention = BitAttention::load(128, 4, 2, 0.1, false, 1e-5, vb).unwrap();
+        let bit_attention = BitAttention::load(cfg, vb).unwrap();
 
         b.iter(|| {
             for _ in 1..100 {

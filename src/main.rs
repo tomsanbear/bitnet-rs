@@ -28,6 +28,11 @@ struct EvaluationCmd {}
 
 #[derive(Parser, Debug, Clone)]
 pub struct TrainingCmd {
+    /// The data type for the weights, due to the implementation, we should theoretically be able to use a single bit, but we need candle to support this or contribute this
+    /// For now, this can only be: u8, u32, bf16, f16, f32, f64
+    #[arg(long, default_value = "f16")]
+    dtype: String,
+
     /// The path to the dataset.
     #[arg(
         long,

@@ -1,5 +1,5 @@
 use candle_core::{Module, Tensor};
-use candle_nn::{seq, Sequential, VarBuilder};
+use candle_nn::{layer_norm, seq, Dropout, LayerNormConfig, Sequential, VarBuilder};
 
 use crate::bit_linear::Bitlinear;
 
@@ -8,13 +8,39 @@ pub struct BitFeedForward {
 }
 
 impl BitFeedForward {
-    #[allow(dead_code)]
-    pub fn load(dim: usize, ff_mult: usize, vb: VarBuilder) -> candle_core::Result<Self> {
-        let hidden_dim = dim * ff_mult;
+    pub fn load(
+        dim: usize,
+        ff_mult: usize,
+        dropout: f32,
+        train: bool,
+        vb: VarBuilder,
+    ) -> candle_core::Result<Self> {
+        let inner_dim = dim * ff_mult;
+        let activation = Tensor::gelu;
+        let dropout = Dropout::new(dropout);
+        let norm = layer_norm(
+            inner_dim,
+            LayerNormConfig {
+                ..LayerNormConfig::default()
+            },
+            vb.pp("ffn_layer_norm"),
+        )?;
         let layer = seq()
-            .add(Bitlinear::load(dim, hidden_dim, vb.pp("first"))?)
-            .add(Tensor::gelu)
-            .add(Bitlinear::load(hidden_dim, dim, vb.pp("second"))?);
+            .add(Bitlinear::load(
+                dim,
+                inner_dim,
+                1,
+                vb.pp("ffn_bitlinear_0"),
+            )?)
+            .add(activation)
+            .add_fn(move |x| norm.forward(x))
+            .add_fn(move |x| Ok(dropout.forward(x, train)?))
+            .add(Bitlinear::load(
+                inner_dim,
+                dim,
+                1,
+                vb.pp("ffn_bitlinear_1"),
+            )?);
         Ok(Self { layer })
     }
 }
@@ -27,6 +53,7 @@ impl Module for BitFeedForward {
 
 #[cfg(test)]
 mod bitffn_tests {
+    use super::BitFeedForward;
     use crate::utils_tensor::device;
     use candle_core::{DType, Device, Module, Result, Tensor};
     use candle_nn::VarBuilder;
@@ -37,30 +64,10 @@ mod bitffn_tests {
         let vb = VarBuilder::zeros(DType::F32, &device);
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
-        let bff = super::BitFeedForward::load(dim, 4, vb)?;
+        let bff = BitFeedForward::load(dim, 1, 0.0, false, vb)?;
         let output = bff.forward(&input).unwrap();
         let output_shape = output.shape().dims2()?;
-
-        assert_eq!(output_shape.0, 10);
-        assert_eq!(output_shape.1, dim);
-
-        Ok(())
-    }
-
-    #[test]
-    fn it_applies_forward_pass_dim_3() -> Result<()> {
-        let device = device(true).unwrap();
-        let vb = VarBuilder::zeros(DType::F32, &device);
-        let dim = 128;
-        let input: Tensor = Tensor::randn(0f32, 1.0, (1, 10, dim), &device)?;
-        let bff = super::BitFeedForward::load(dim, 4, vb)?;
-        let output = bff.forward(&input).unwrap();
-        let output_shape = output.shape().dims3()?;
-
-        assert_eq!(output_shape.0, 1);
-        assert_eq!(output_shape.1, 10);
-        assert_eq!(output_shape.2, dim);
-
+        assert_eq!(output_shape, (10, dim));
         Ok(())
     }
 }

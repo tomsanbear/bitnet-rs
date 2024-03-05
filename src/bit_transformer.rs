@@ -1,4 +1,4 @@
-use crate::bit_attention::BitAttention;
+use crate::bit_attention::{BitAttention, BitAttentionCfg};
 use crate::bit_ffn::BitFeedForward;
 use crate::config::Config;
 use crate::utils_rms_norm::RmsNorm;
@@ -15,23 +15,27 @@ pub struct BitTransformer {
 impl BitTransformer {
     pub fn load(cfg: Config, vb: VarBuilder) -> Result<Self> {
         let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("model.embed_tokens"))?;
-
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {
                 (
                     BitAttention::load(
-                        cfg.dim,
-                        cfg.heads,
-                        4,
-                        0.1,
-                        true,
-                        1e-6,
+                        BitAttentionCfg {
+                            embed_dim: cfg.dim,
+                            query_heads: cfg.heads,
+                            kv_heads: 4,
+                            dropout: 0.1,
+                            layer_norm_enabled: true,
+                            layer_norm_eps: cfg.layer_norm_eps,
+                            bit_attention_eps: cfg.bit_attention_eps,
+                        },
                         vb.pp(&format!("model.attn_layers.{i}")),
                     )
                     .unwrap(),
                     BitFeedForward::load(
                         cfg.dim,
                         cfg.ff_mult,
+                        cfg.ff_dropout,
+                        false,
                         vb.pp(&format!("model.ffn_layers.{i}")),
                     )
                     .unwrap(),
@@ -55,7 +59,7 @@ impl BitTransformer {
         for (attn, ffn) in self.blocks.iter() {
             (x, _) = attn.forward(x.clone(), x.clone(), x.clone(), false, true, false)?;
             x = x.add(&x)?;
-            x = (ffn.forward(&x) + &x)?
+            x = ffn.forward(&x)?.add(&x)?;
         }
         let x = self.to_logits.forward(&x)?;
         Ok(x)

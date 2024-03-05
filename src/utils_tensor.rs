@@ -14,6 +14,31 @@ pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
     Ok(sign_x)
 }
 
+#[cfg(test)]
+mod sign_tests {
+    use crate::utils_tensor::sign;
+    use candle_core::{Device, Result, Tensor};
+
+    #[test]
+    fn it_works() -> Result<()> {
+        let input = vec![-3f32, -2f32, -1f32, 0f32, 1f32, 2f32, 3f32];
+        let input_size = input.len();
+        let tensor = Tensor::from_vec(input, (input_size,), &Device::Cpu)?;
+        let output = sign(&tensor).unwrap();
+
+        let expected_shape = [input_size];
+        assert_eq!(output.shape().dims(), &expected_shape);
+
+        let expected_output = [-1f32, -1f32, -1f32, 0f32, 1f32, 1f32, 1f32];
+        let output = output.squeeze(0)?;
+        let output = output.to_vec1::<f32>()?;
+
+        assert_eq!(output, expected_output);
+
+        Ok(())
+    }
+}
+
 // Get the device to use for the tensor operations, only really used for tests
 // Originally from: https://github.com/huggingface/candle/blob/314630638d8f6886c07d73211d6c35f8cf05d56a/candle-examples/src/lib.rs#L9
 #[allow(dead_code)]
@@ -39,28 +64,19 @@ pub fn device(cpu: bool) -> Result<Device> {
     }
 }
 
-#[cfg(test)]
-mod sign_tests {
-    use crate::utils_tensor::sign;
-    use candle_core::{Device, Result, Tensor};
-
-    #[test]
-    fn it_works() -> Result<()> {
-        let input = vec![-3f32, -2f32, -1f32, 0f32, 1f32, 2f32, 3f32];
-        let input_size = input.len();
-        let tensor = Tensor::from_vec(input, (input_size,), &Device::Cpu)?;
-        let output = sign(&tensor).unwrap();
-
-        let expected_shape = [input_size];
-        assert_eq!(output.shape().dims(), &expected_shape);
-
-        let expected_output = [-1f32, -1f32, -1f32, 0f32, 1f32, 1f32, 1f32];
-        let output = output.squeeze(0)?;
-        let output = output.to_vec1::<f32>()?;
-
-        assert_eq!(output, expected_output);
-
-        Ok(())
+// For a given device, return the dtype for the requested dtype
+pub fn dtype(device: &Device) -> Result<candle_core::DType> {
+    if device.is_cpu() {
+        // We use f32 for cpu since f16 is not supported for many required operations
+        Ok(candle_core::DType::F32)
+    } else if device.is_metal() {
+        // We use f32 for metal since f16 is not supported for many required operations
+        Ok(candle_core::DType::F32)
+    } else if device.is_cuda() {
+        // We use f16 for cuda since we don't actually need anything more than that for this model
+        Ok(candle_core::DType::F16)
+    } else {
+        return Err(anyhow!("Unsupported device"));
     }
 }
 

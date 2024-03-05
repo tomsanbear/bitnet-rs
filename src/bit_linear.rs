@@ -1,87 +1,100 @@
 use candle_core::Tensor;
-use candle_nn::{
-    init::{FanInOut, NonLinearity, NormalOrUniform},
-    Init, Linear, Module, VarBuilder,
-};
+use candle_nn::{layer_norm, LayerNorm, LayerNormConfig, Linear, Module, VarBuilder};
 
 use crate::utils_tensor::sign;
 
 pub struct Bitlinear {
-    pub in_features: usize,
-    pub out_features: usize,
+    num_groups: usize,
     weight: Tensor,
+    layer_norm: LayerNorm,
 }
 
 impl Bitlinear {
     pub fn load(
         in_features: usize,
         out_features: usize,
+        num_groups: usize,
         vb: VarBuilder,
     ) -> candle_core::Result<Self> {
-        let init_weights = Init::Kaiming {
-            dist: NormalOrUniform::Normal,
-            fan: FanInOut::FanIn,
-            non_linearity: NonLinearity::ReLU,
-        };
-        let weight = vb.get_with_hints((out_features, in_features), "weight", init_weights)?;
-        Ok(Self {
+        let weight = Tensor::rand(0.0f32, 1.0f32, (out_features, in_features), vb.device())?;
+        let layer_norm = layer_norm(
             in_features,
-            out_features,
+            LayerNormConfig {
+                ..LayerNormConfig::default()
+            },
+            vb.pp("layer_norm"),
+        )?;
+        Ok(Self {
+            num_groups,
             weight,
+            layer_norm,
         })
+    }
+
+    fn ste(&self, x: &Tensor) -> candle_core::Result<Tensor> {
+        // binarized_x = torch.sign(x)
+        let binarized_x = sign(x)?;
+        let binarized_x = binarized_x.sub(&x)?.detach().add(&x)?;
+        Ok(binarized_x)
+    }
+
+    fn binarize_weights_groupwise(&self) -> candle_core::Result<Tensor> {
+        let group_size = self.weight.dims()[0] / self.num_groups;
+        let mut bin_weights = self.weight.zeros_like()?;
+        for i in 0..self.num_groups {
+            let d0_start_idx = i * group_size;
+            let d0_end_idx = (i + 1) * group_size;
+            let d1_end_idx = bin_weights.dims()[1];
+            let weight_group = self.weight.narrow(0, d0_start_idx, group_size)?;
+            let alpha_g = weight_group.mean_all()?;
+            let ste_result = self.ste(&weight_group.broadcast_sub(&alpha_g)?)?;
+            bin_weights = bin_weights
+                .slice_assign(&[d0_start_idx..d0_end_idx, (0..d1_end_idx)], &ste_result)?;
+        }
+        Ok(bin_weights)
     }
 }
 
 impl Module for Bitlinear {
     fn forward(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let x = sign(x)?;
-        let gamma = self.weight.abs()?.mean_all()?; // 0 dimensional tensor
-        let w_scaled = self.weight.broadcast_mul(&gamma)?; // 2 dimensional vector
-        let w_quantized = sign(&w_scaled)?.mul(&w_scaled.abs()?.round()?.clamp(0u8, 1u8)?)?;
-        let x: Tensor = Linear::new(w_quantized, None).forward(&x)?;
-        Ok(x)
+        // normalize input
+        let x = self.layer_norm.forward(x)?;
+
+        // binarize weights and quantize activations
+        let binarized_weights = self.binarize_weights_groupwise()?;
+
+        // perform linear transformation
+        let output = Linear::new(binarized_weights, None).forward(&x)?;
+
+        // quantize activations
+        fn absmean_quantize_weights(output: &Tensor) -> candle_core::Result<Tensor> {
+            let gamma = output.abs()?.mean_all()?;
+            let quantized_weights = output.broadcast_div(&gamma)?.round()?.clamp(-1i64, 1i64)?;
+            Ok(quantized_weights)
+        }
+        let output = absmean_quantize_weights(&output)?;
+
+        Ok(output)
     }
 }
 
 #[cfg(test)]
 mod bitlinear_tests {
+    use super::Bitlinear;
     use crate::utils_tensor::device;
     use candle_core::{DType, Module, Result, Tensor};
     use candle_nn::var_builder::VarBuilderArgs;
-    use test::Bencher;
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
-        let in_features = 128;
-        let out_features = 64;
-        let bl = super::Bitlinear::load(in_features, out_features, vb)?;
-        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device.clone())?;
-        let output = bl.forward(&input).unwrap();
-        let output_shape = output.shape().dims2()?;
-
-        assert_eq!(output_shape.0, 10);
-        assert_eq!(output_shape.1, 64);
-
-        Ok(())
-    }
-
-    #[bench]
-    fn bench_bit_linear(b: &mut Bencher) -> Result<()> {
-        let device = device(true).unwrap();
-        let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
-        let in_features = 128;
-        let out_features = 64;
-        let bl = super::Bitlinear::load(in_features, out_features, vb)?;
-        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (10, 128), &device)?;
-
-        b.iter(|| {
-            for _ in 1..100 {
-                bl.forward(&input).unwrap();
-            }
-        });
-
+        let in_features = 768;
+        let out_features = 32;
+        let bl = Bitlinear::load(in_features, out_features, 2, vb)?;
+        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (4, 64, 1024), &device.clone())?;
+        let output = bl.forward(&input)?;
+        assert_eq!(output.shape().dims2()?, (5, 5));
         Ok(())
     }
 }

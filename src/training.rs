@@ -1,7 +1,8 @@
 use crate::config::Config;
+use crate::utils_tensor::dtype;
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
-use candle_core::{DType, Device};
+use candle_core::Device;
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
 use candle_nn::loss::cross_entropy;
@@ -23,7 +24,7 @@ fn valid_loss(
         let (inp, tgt) = inp_tgt?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
-        sum_ce += f64::from(loss.to_vec0::<half::bf16>()?);
+        sum_ce += f64::from(loss.to_vec0::<f32>()?);
         cnt += 1;
     }
     Ok(sum_ce / cnt as f64)
@@ -33,9 +34,12 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     // Setup device
     let device = device(common_args.cpu)?;
 
+    // Get the underlying data type to use for the model
+    let dtype = dtype(&device)?;
+
     // Setup varbuilder
     let varmap = VarMap::new();
-    let vb = VarBuilder::from_varmap(&varmap, DType::BF16, &device);
+    let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
 
     // Get the datasets
     let dataset = { Dataset::new("../../karpathy/llama2.c/data/TinyStories_all_data")? };
