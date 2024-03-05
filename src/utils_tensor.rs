@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use candle_core::utils::{cuda_is_available, metal_is_available};
-use candle_core::{DType, Device, Tensor, D};
+use candle_core::{Device, Tensor, D};
 use candle_nn::ops::softmax;
 use candle_nn::Dropout;
 
@@ -68,7 +68,7 @@ mod sign_tests {
 fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor> {
     let shape = mask.shape();
     let _on_true = Tensor::new(on_true, on_false.device())?.broadcast_as(shape.dims())?;
-    let m = on_false.broadcast_mul(&mask.to_dtype(DType::F32)?)?;
+    let m = on_false.broadcast_mul(&mask.to_dtype(on_false.dtype())?)?;
     Ok(m)
 }
 
