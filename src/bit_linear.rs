@@ -34,7 +34,7 @@ impl Bitlinear {
     fn ste(&self, x: &Tensor) -> candle_core::Result<Tensor> {
         // binarized_x = torch.sign(x)
         let binarized_x = sign(x)?;
-        let binarized_x = binarized_x.sub(&x)?.detach().add(&x)?;
+        let binarized_x = binarized_x.sub(x)?.detach().add(x)?;
         Ok(binarized_x)
     }
 

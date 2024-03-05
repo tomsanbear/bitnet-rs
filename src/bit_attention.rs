@@ -148,7 +148,7 @@ mod bit_attention_tests {
     use candle_nn::VarBuilder;
     use test::Bencher;
 
-    const cfg: BitAttentionCfg = BitAttentionCfg {
+    const DEFAULT_CFG: BitAttentionCfg = BitAttentionCfg {
         embed_dim: 512,
         kv_heads: 8,
         query_heads: 4,
@@ -170,7 +170,7 @@ mod bit_attention_tests {
         let expected_output_tensor = safetensor.get("output_small").unwrap();
         let expected_attn_weights = safetensor.get("attn_weights_small").unwrap();
 
-        let bit_attention = BitAttention::load(cfg, vb).unwrap();
+        let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
 
         let (output_tensor, attn_weights) = bit_attention
             .forward(
@@ -194,7 +194,7 @@ mod bit_attention_tests {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
         let input = Tensor::randn(0.0f32, 1.0f32, (1, 10, 128), &device)?;
-        let bit_attention = BitAttention::load(cfg, vb).unwrap();
+        let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
 
         b.iter(|| {
             for _ in 1..100 {

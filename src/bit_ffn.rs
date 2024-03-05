@@ -34,7 +34,7 @@ impl BitFeedForward {
             )?)
             .add(activation)
             .add_fn(move |x| norm.forward(x))
-            .add_fn(move |x| Ok(dropout.forward(x, train)?))
+            .add_fn(move |x| dropout.forward(x, train))
             .add(Bitlinear::load(
                 inner_dim,
                 dim,
