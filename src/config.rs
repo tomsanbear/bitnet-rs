@@ -11,16 +11,17 @@ pub struct Config {
 }
 
 impl Config {
+    // Default configuration for initial evaluation, will add larger configs later after confirming valid output
     pub fn default() -> Self {
         Self {
             dim: 64,
             depth: 8,
             vocab_size: 32000,
             heads: 8,
-            ff_mult: 12,
+            ff_mult: 4,
             layer_norm_eps: 1e-6,
             bit_attention_eps: 1e-6,
-            ff_dropout: 0.0,
+            ff_dropout: 0.1,
         }
     }
 }
