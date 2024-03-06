@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use crate::config::Config;
 use crate::utils_tensor::{cross_entropy, dtype};
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
@@ -22,7 +24,12 @@ fn valid_loss(
     let batch_iter = Batcher::new_r2(iter).batch_size(batch_size);
     let mut sum_ce = 0f64;
     let mut cnt = 0usize;
-    for inp_tgt in tqdm!(batch_iter.take(50), total = 50, desc = "Validating loss") {
+    let batch_count = 10;
+    for inp_tgt in tqdm!(
+        batch_iter.take(batch_count),
+        total = batch_count,
+        desc = "Checking loss"
+    ) {
         let span = tracing::span!(tracing::Level::TRACE, "validate-loss-iter");
         let _enter = span.enter();
         let (inp, tgt) = inp_tgt?;
@@ -76,10 +83,15 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         opt.backward_step(&loss)?;
-        if batch_index > 0 && batch_index % 100 == 0 {
-            let loss = valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
-            println!("batch={batch_index}, loss={loss}");
-            varmap.save("checkpoint.safetensors")?
+        if batch_index > 0 && batch_index % 10 == 0 {
+            let training_loss = f64::from(loss.to_vec0::<f32>()?);
+            let validation_loss =
+                valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
+            println!("training loss={training_loss}");
+            println!("validation loss={validation_loss}");
+            let now = SystemTime::now();
+            let checkpoint_file_name = format!("checkpoint-{:?}.safetensors", now);
+            varmap.save(checkpoint_file_name)?
         }
     }
 

@@ -40,7 +40,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
 
     let start_gen = std::time::Instant::now();
     for index in 0.. {
-        if tokens.len() >= config.seq_len {
+        if tokens.len() >= config.max_seq_len {
             break;
         }
         let context_size = if index > 0 { 1 } else { tokens.len() };
