@@ -1,7 +1,6 @@
+use crate::utils_tensor::{absmean_quantize_weights, sign};
 use candle_core::Tensor;
-use candle_nn::{layer_norm, LayerNorm, LayerNormConfig, Linear, Module, VarBuilder};
-
-use crate::utils_tensor::sign;
+use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Linear, Module, VarBuilder};
 
 pub struct Bitlinear {
     num_groups: usize,
@@ -16,7 +15,14 @@ impl Bitlinear {
         num_groups: usize,
         vb: VarBuilder,
     ) -> candle_core::Result<Self> {
-        let weight = Tensor::rand(0.0f32, 1.0f32, (out_features, in_features), vb.device())?;
+        let weight = vb.get_with_hints(
+            (out_features, in_features),
+            "weights",
+            Init::Randn {
+                mean: 0.0,
+                stdev: 1.0,
+            },
+        )?;
         let layer_norm = layer_norm(
             in_features,
             LayerNormConfig {
@@ -67,11 +73,6 @@ impl Module for Bitlinear {
         let output = Linear::new(binarized_weights, None).forward(&x)?;
 
         // quantize activations
-        fn absmean_quantize_weights(output: &Tensor) -> candle_core::Result<Tensor> {
-            let gamma = output.abs()?.mean_all()?;
-            let quantized_weights = output.broadcast_div(&gamma)?.round()?.clamp(-1i64, 1i64)?;
-            Ok(quantized_weights)
-        }
         let output = absmean_quantize_weights(&output)?;
 
         Ok(output)

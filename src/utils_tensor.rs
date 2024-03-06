@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use candle_core::utils::{cuda_is_available, metal_is_available};
-use candle_core::{Device, Tensor, D};
+use candle_core::{DType, Device, Tensor, D};
 use candle_nn::ops::softmax;
 use candle_nn::Dropout;
 
@@ -80,14 +80,6 @@ pub fn dtype(device: &Device) -> Result<candle_core::DType> {
     }
 }
 
-// Mask the elements of a tensor based on a mask tensor
-fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor> {
-    let shape = mask.shape();
-    let _on_true = Tensor::new(on_true, on_false.device())?.broadcast_as(shape.dims())?;
-    let m = on_false.broadcast_mul(&mask.to_dtype(on_false.dtype())?)?;
-    Ok(m)
-}
-
 pub struct ScaledDotProductCfg {
     pub is_causal: bool,
     pub need_weights: bool,
@@ -96,8 +88,6 @@ pub struct ScaledDotProductCfg {
     pub dropout: f32,
 }
 
-// Scaled dot-product attention with grouped query and key heads.
-// Original implementation: https://github.com/kyegomez/BitNet/blob/2fe67c30f2b47fb510b39f7a4cffb79fad354838/bitnet/bit_attention.py#L10
 pub fn scaled_dot_product_gqa(
     query: Tensor, // (b, n, h, d)
     key: Tensor,   // (b, s, h, d)
@@ -119,7 +109,7 @@ pub fn scaled_dot_product_gqa(
     let value = value.permute([0, 2, 1, 3])?;
 
     // Extract the dimensions
-    let (bq, hq, nq, dq) = query.dims4()?;
+    let (bq, hq, _nq, dq) = query.dims4()?;
     let (bk, hk, nk, dk) = key.dims4()?;
     let (bv, hv, nv, dv) = value.dims4()?;
 
@@ -183,7 +173,7 @@ pub fn scaled_dot_product_gqa(
         true => {
             // Mask out the upper triangular portion of the attention matrix. This prevents
             // the model from attending to tokens in the future
-            let mask = Tensor::ones((bq, nq, nk), query.dtype(), query.device())?;
+            let mask = Tensor::zeros(similarity.shape(), DType::U8, similarity.device())?;
             Some(mask)
         }
         false => None,
@@ -204,7 +194,10 @@ pub fn scaled_dot_product_gqa(
     };
 
     let similarity = match mask {
-        Some(mask) => masked_fill(&similarity, &mask, f32::NEG_INFINITY)?,
+        Some(mask) => {
+            let on_true = Tensor::zeros_like(&similarity)?;
+            mask.where_cond(&on_true, &similarity)?
+        }
         None => similarity,
     };
 
@@ -269,7 +262,6 @@ mod scaled_dot_product_gqa_tests {
                     let device = device(true).unwrap();
                     let safetensor =
                         safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
-
                     let input_tensor_name = format!("{}_input", input);
                     let input_tensor = match safetensor.get(input_tensor_name.as_str()) {
                         Some(tensor) => tensor,
@@ -332,7 +324,6 @@ mod scaled_dot_product_gqa_tests {
         let device = device(true).unwrap();
         let safetensor =
             safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
-
         let input_tensor = match safetensor.get("small_input") {
             Some(tensor) => tensor,
             None => panic!("Input tensor not found"),
@@ -358,4 +349,10 @@ mod scaled_dot_product_gqa_tests {
 
         Ok(())
     }
+}
+
+pub fn absmean_quantize_weights(output: &Tensor) -> candle_core::Result<Tensor> {
+    let gamma = output.abs()?.mean_all()?;
+    let quantized_weights = output.broadcast_div(&gamma)?.round()?.clamp(-1i64, 1i64)?;
+    Ok(quantized_weights)
 }
