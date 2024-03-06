@@ -72,10 +72,6 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     ) {
         let span = tracing::span!(tracing::Level::TRACE, "training-iteration");
         let _enter = span.enter();
-        if batch_index > args.max_steps {
-            println!("reached max steps, exiting");
-            break;
-        }
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
