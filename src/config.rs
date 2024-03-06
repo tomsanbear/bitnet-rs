@@ -8,6 +8,7 @@ pub struct Config {
     pub(crate) layer_norm_eps: f64,
     pub(crate) bit_attention_eps: f64,
     pub(crate) ff_dropout: f32,
+    pub(crate) seq_len: usize,
 }
 
 impl Config {
@@ -22,6 +23,7 @@ impl Config {
             layer_norm_eps: 1e-6,
             bit_attention_eps: 1e-6,
             ff_dropout: 0.1,
+            seq_len: 512,
         }
     }
 }

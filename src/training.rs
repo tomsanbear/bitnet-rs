@@ -1,11 +1,10 @@
 use crate::config::Config;
-use crate::utils_tensor::dtype;
+use crate::utils_tensor::{cross_entropy, dtype};
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
 use candle_core::Device;
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
-use candle_nn::loss::cross_entropy;
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use kdam::tqdm;
 
@@ -16,11 +15,16 @@ fn valid_loss(
     model: &mut BitTransformer,
     device: &Device,
 ) -> Result<f64> {
+    let span = tracing::span!(tracing::Level::TRACE, "validate-loss");
+    let _enter = span.enter();
+
     let iter = DatasetRandomIter::new(dataset, true, seq_len, device.clone());
     let batch_iter = Batcher::new_r2(iter).batch_size(batch_size);
     let mut sum_ce = 0f64;
     let mut cnt = 0usize;
     for inp_tgt in tqdm!(batch_iter.take(50), total = 50, desc = "Validating loss") {
+        let span = tracing::span!(tracing::Level::TRACE, "validate-loss-iter");
+        let _enter = span.enter();
         let (inp, tgt) = inp_tgt?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
@@ -31,6 +35,9 @@ fn valid_loss(
 }
 
 pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
+    let span = tracing::span!(tracing::Level::TRACE, "training");
+    let _enter = span.enter();
+
     // Setup device
     let device = device(common_args.cpu)?;
 
@@ -46,7 +53,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Setup the model
     let config = Config::default();
-    let mut model = BitTransformer::load(config, vb)?;
+    let mut model = BitTransformer::load(config, vb, false)?;
 
     // Setup the optimizer
     let params = ParamsAdamW {
@@ -63,15 +70,17 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         total = args.max_steps,
         desc = "Training"
     ) {
+        let span = tracing::span!(tracing::Level::TRACE, "training-iteration");
+        let _enter = span.enter();
         if batch_index > args.max_steps {
+            println!("reached max steps, exiting");
             break;
         }
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         opt.backward_step(&loss)?;
-
-        if batch_index > 0 && batch_index % 10 == 0 {
+        if batch_index > 0 && batch_index % 100 == 0 {
             let loss = valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
             println!("batch={batch_index}, loss={loss}");
             varmap.save("checkpoint.safetensors")?

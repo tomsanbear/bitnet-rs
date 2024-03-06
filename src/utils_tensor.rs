@@ -3,14 +3,20 @@ use candle_core::utils::{cuda_is_available, metal_is_available};
 use candle_core::{DType, Device, Tensor, D};
 use candle_nn::ops::softmax;
 use candle_nn::Dropout;
+use tracing::{event, Level};
 
-// Convert an input tensor into a tensor of the same shape but with all elements set to it's sign, one of -1, 0 or 1.
+// Transform the input values of the tensor to it's signs, -1, 0 or 1
 pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
-    // The zeros are converted to ones here to enable us to avoid dividing by zero, not sure if there is a cleaner way to avoid the extra ops
-    let zeros = x.eq(0f32)?.to_dtype(x.dtype())?;
-    let abs_x = x.abs()?.to_dtype(x.dtype())?.add(&zeros)?;
-    // need to handle dividing by zero
+    let span = tracing::span!(tracing::Level::TRACE, "sign");
+    let _enter = span.enter();
+
+    // Implemented as by dividing by the absolute value to get the sign, we add a 1 to the numerator where x = 0 such that we don't divide by zero
+    let zeros = x.broadcast_eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?;
+    event!(Level::TRACE, "zeros: {:?}", zeros);
+    let abs_x = x.abs()?.add(&zeros.to_dtype(x.dtype())?)?;
+    event!(Level::TRACE, "abs_x: {:?}", abs_x);
     let sign_x = (x / abs_x)?;
+    event!(Level::TRACE, "sign_x: {:?}", sign_x);
     Ok(sign_x)
 }
 
@@ -352,7 +358,18 @@ mod scaled_dot_product_gqa_tests {
 }
 
 pub fn absmean_quantize_weights(output: &Tensor) -> candle_core::Result<Tensor> {
-    let gamma = output.abs()?.mean_all()?;
-    let quantized_weights = output.broadcast_div(&gamma)?.round()?.clamp(-1i64, 1i64)?;
+    let span = tracing::span!(tracing::Level::TRACE, "absmean-quantize-weights");
+    let _enter = span.enter();
+    let gamma = output.abs()?;
+    let gamma = gamma.mean_all()?;
+    let quantized_weights = output.broadcast_div(&gamma)?;
+    let quantized_weights = sign(&quantized_weights.round()?)?;
     Ok(quantized_weights)
+}
+
+// Wrapper on cross entropy to add tracing
+pub fn cross_entropy(inp: &Tensor, target: &Tensor) -> candle_core::Result<Tensor> {
+    let span = tracing::span!(tracing::Level::TRACE, "cross-entropy");
+    let _enter = span.enter();
+    candle_nn::loss::cross_entropy(inp, target)
 }

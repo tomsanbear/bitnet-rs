@@ -1,7 +1,7 @@
 use crate::bit_attention::{BitAttention, BitAttentionCfg};
-use crate::bit_ffn::BitFeedForward;
+use crate::bit_ffn::{BitFeedForward, BitFeedForwardCfg};
 use crate::config::Config;
-use crate::utils_rms_norm::RmsNorm;
+use crate::rms_norm::RmsNorm;
 use anyhow::Result;
 use candle_core::{Module, Tensor};
 use candle_nn::{embedding, linear, seq, Embedding, Sequential, VarBuilder};
@@ -10,10 +10,12 @@ pub struct BitTransformer {
     embedding: Embedding,
     blocks: Vec<(BitAttention, BitFeedForward)>,
     to_logits: Sequential,
+    span: tracing::Span,
 }
 
 impl BitTransformer {
-    pub fn load(cfg: Config, vb: VarBuilder) -> Result<Self> {
+    pub fn load(cfg: Config, vb: VarBuilder, train: bool) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "bit-transformer");
         let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("model.embed_tokens"))?;
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {
@@ -32,10 +34,13 @@ impl BitTransformer {
                     )
                     .unwrap(),
                     BitFeedForward::load(
-                        cfg.dim,
-                        cfg.ff_mult,
-                        cfg.ff_dropout,
-                        false,
+                        BitFeedForwardCfg {
+                            dim: cfg.dim,
+                            ff_mult: cfg.ff_mult,
+                            dropout: cfg.ff_dropout,
+                            train,
+                            eps: cfg.layer_norm_eps,
+                        },
                         vb.pp(&format!("model.ffn_layers.{i}")),
                     )
                     .unwrap(),
@@ -48,6 +53,7 @@ impl BitTransformer {
             .add(linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?);
 
         Ok(Self {
+            span,
             blocks,
             to_logits,
             embedding,
@@ -55,6 +61,7 @@ impl BitTransformer {
     }
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
+        let _enter = self.span.enter();
         let mut x = self.embedding.forward(x)?;
         for (attn, ffn) in self.blocks.iter() {
             (x, _) = attn.forward(x.clone(), x.clone(), x.clone(), false, true, false)?;
@@ -79,7 +86,7 @@ mod bitnet_transformer_tests {
     fn it_applies_forward_pass() -> Result<()> {
         let device = &device(false)?;
         let vb = VarBuilder::zeros(DType::F32, device);
-        let mut t = BitTransformer::load(Config::default(), vb)?;
+        let mut t = BitTransformer::load(Config::default(), vb, true)?;
         let x = Tensor::ones((1, 128), DType::U32, device)?;
         let x = t.forward(&x)?;
 

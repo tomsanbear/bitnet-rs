@@ -7,8 +7,9 @@ mod bit_linear;
 mod bit_transformer;
 mod config;
 mod inference;
+mod rms_norm;
+mod token_output_stream;
 mod training;
-mod utils_rms_norm;
 mod utils_tensor;
 
 use anyhow::{anyhow, Result};
@@ -21,10 +22,28 @@ extern crate accelerate_src;
 extern crate intel_mkl_src;
 
 #[derive(Parser, Debug, Clone)]
-struct InferenceCmd {}
+struct InferenceCmd {
+    /// The temperature used to generate samples.
+    #[arg(long)]
+    temperature: Option<f64>,
 
-#[derive(Parser, Debug, Clone)]
-struct EvaluationCmd {}
+    /// Nucleus sampling probability cutoff.
+    #[arg(long)]
+    top_p: Option<f64>,
+
+    /// The repeat penalty to use
+    #[arg(long, default_value = "1.1")]
+    repeat_penalty: f32,
+
+    /// The prompt for generation
+    #[arg(long, default_value = "")]
+    prompt: String,
+
+    /// The number of tokens to repeat
+    /// This is used to penalize repeating tokens
+    #[arg(long, default_value = "10")]
+    repeat_last_n: usize,
+}
 
 #[derive(Parser, Debug, Clone)]
 pub struct TrainingCmd {
@@ -64,7 +83,6 @@ pub struct TrainingCmd {
 #[derive(Subcommand, Debug, Clone)]
 enum Task {
     Inference(InferenceCmd),
-    Eval(EvaluationCmd),
     Train(TrainingCmd),
 }
 
@@ -100,7 +118,7 @@ fn main() -> Result<()> {
     };
 
     match &args.task {
-        Some(Task::Inference(_cmd)) => inference::run()?,
+        Some(Task::Inference(cmd)) => inference::run(cmd, &args)?,
         Some(Task::Train(cmd)) => training::run(cmd, &args)?,
         _ => return Err(anyhow!("No task specified")),
     }

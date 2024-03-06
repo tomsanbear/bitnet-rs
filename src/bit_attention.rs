@@ -25,10 +25,12 @@ pub struct BitAttention {
     dropout: f32,
     query_heads: usize,
     kv_heads: usize,
+    span: tracing::Span,
 }
 
 impl BitAttention {
     pub fn load(cfg: BitAttentionCfg, vb: VarBuilder) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::TRACE, "bit-attention");
         let kv_embed_dim = cfg.embed_dim / cfg.query_heads * cfg.kv_heads;
         let head_dim = cfg.embed_dim / cfg.query_heads;
         if cfg.query_heads % cfg.kv_heads != 0 {
@@ -65,6 +67,7 @@ impl BitAttention {
         let out_proj = Bitlinear::load(kv_embed_dim, cfg.embed_dim, 1, vb.pp("out_proj"))?;
 
         Ok(BitAttention {
+            span,
             q_proj,
             k_proj,
             v_proj,
@@ -85,6 +88,8 @@ impl BitAttention {
         is_causal: bool,
         average_attn_weights: bool,
     ) -> Result<(Tensor, Option<Tensor>)> {
+        let _enter = self.span.enter();
+
         // shape (b, n, d)
         let q = self.q_proj.forward(&query)?;
         let k = self.k_proj.forward(&key)?;
