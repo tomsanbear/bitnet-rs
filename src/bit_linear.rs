@@ -70,7 +70,6 @@ impl Bitlinear {
 }
 
 impl Module for Bitlinear {
-    // TODO: convert weights to and from a smaller data type since we are only using trinary states
     fn forward(&self, x: &Tensor) -> candle_core::Result<Tensor> {
         let _enter = self.span.enter();
 

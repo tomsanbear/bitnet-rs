@@ -53,7 +53,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Setup the model
     let config = Config::default();
-    let mut model = BitTransformer::load(config, vb, false)?;
+    let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
     let params = ParamsAdamW {

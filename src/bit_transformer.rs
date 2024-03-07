@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::bit_attention::{BitAttention, BitAttentionCfg};
 use crate::bit_ffn::{BitFeedForward, BitFeedForwardCfg};
 use crate::config::Config;
@@ -30,7 +32,7 @@ impl BitTransformer {
                             layer_norm_eps: cfg.layer_norm_eps,
                             bit_attention_eps: cfg.bit_attention_eps,
                         },
-                        vb.pp(&format!("model.attn_layers.{i}")),
+                        vb.pp(&format!("attn.{i}")),
                     )
                     .unwrap(),
                     BitFeedForward::load(
@@ -41,7 +43,7 @@ impl BitTransformer {
                             train,
                             eps: cfg.layer_norm_eps,
                         },
-                        vb.pp(&format!("model.ffn_layers.{i}")),
+                        vb.pp(&format!("ffn.{i}")),
                     )
                     .unwrap(),
                 )
@@ -62,13 +64,24 @@ impl BitTransformer {
 
     pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
         let _enter = self.span.enter();
-        let mut x = self.embedding.forward(x)?;
-        for (attn, ffn) in self.blocks.iter() {
-            (x, _) = attn.forward(x.clone(), x.clone(), x.clone(), false, true, false)?;
-            x = x.add(&x)?;
-            x = ffn.forward(&x)?.add(&x)?;
-        }
+
+        // Run the embedding layer
+        let x_embed = self.embedding.forward(x)?;
+
+        // Fold each block forward
+        let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
+            let (x, _) = attn
+                .forward(x.clone(), x.clone(), x.clone(), false, true, false)
+                .unwrap();
+            let x = x.add(&x_embed).unwrap();
+            let x = ffn.forward(&x).unwrap().add(&x).unwrap();
+            x
+        });
+
+        // Convert to logits
         let x = self.to_logits.forward(&x)?;
+
+        // Return the logits
         Ok(x)
     }
 }

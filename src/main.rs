@@ -2,7 +2,9 @@
 extern crate test;
 
 mod bit_attention;
+mod bit_dropout;
 mod bit_ffn;
+mod bit_glu;
 mod bit_linear;
 mod bit_transformer;
 mod config;
@@ -55,7 +57,7 @@ pub struct TrainingCmd {
     /// The path to the dataset.
     #[arg(
         long,
-        default_value = "/Users/tomsanbear/workspace/github.com/karpathy/llama2.c/data/TinyStories_all_data"
+        default_value = "../../karpathy/llama2.c/data/TinyStories_all_data"
     )]
     dataset: String,
 
