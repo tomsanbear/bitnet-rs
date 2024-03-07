@@ -66,7 +66,7 @@ pub struct TrainingCmd {
     max_steps: usize,
 
     /// The batch size to use
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value = "2")]
     batch_size: usize,
 
     /// The learning rate to use
@@ -74,11 +74,11 @@ pub struct TrainingCmd {
     learning_rate: f64,
 
     /// The sequence length to use
-    #[arg(long, default_value = "1024")]
+    #[arg(long, default_value = "512")]
     seq_len: usize,
 
     /// The number of tokens in the vocabulary
-    #[arg(long, default_value = "10000")]
+    #[arg(long, default_value = "32000")]
     num_tokens: usize,
 }
 

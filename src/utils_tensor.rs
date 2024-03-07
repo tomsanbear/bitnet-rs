@@ -80,7 +80,7 @@ pub fn dtype(device: &Device) -> Result<candle_core::DType> {
         Ok(candle_core::DType::F32)
     } else if device.is_cuda() {
         // We use f16 for cuda since we don't actually need anything more than that for this model
-        Ok(candle_core::DType::F16)
+        Ok(candle_core::DType::F32)
     } else {
         return Err(anyhow!("Unsupported device"));
     }

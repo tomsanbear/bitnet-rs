@@ -65,11 +65,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(args.batch_size);
 
     // Training loop
-    for (batch_index, batch) in tqdm!(
-        batch_iter.enumerate(),
-        total = args.max_steps,
-        desc = "Training"
-    ) {
+    for (batch_index, batch) in tqdm!(batch_iter.enumerate(), desc = "Training") {
         let span = tracing::span!(tracing::Level::TRACE, "training-iteration");
         let _enter = span.enter();
         let (inp, tgt) = batch?;
@@ -77,8 +73,8 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         opt.backward_step(&loss)?;
         if batch_index > 0 && batch_index % 100 == 0 {
-            let loss = valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
-            println!("batch={batch_index}, loss={loss}");
+            let training_loss = f64::from(loss.to_vec0::<f32>()?);
+            println!("batch={batch_index}, loss={training_loss}");
             varmap.save("checkpoint.safetensors")?
         }
     }
