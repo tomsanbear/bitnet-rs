@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::bit_attention::{BitAttention, BitAttentionCfg};
 use crate::bit_ffn::{BitFeedForward, BitFeedForwardCfg};
 use crate::config::Config;
@@ -74,7 +72,8 @@ impl BitTransformer {
                 .forward(x.clone(), x.clone(), x.clone(), false, true, false)
                 .unwrap();
             let x = x.add(&x_embed).unwrap();
-            let x = ffn.forward(&x).unwrap().add(&x).unwrap();
+            let x = ffn.forward(&x).unwrap();
+            let x = x.add(&x).unwrap();
             x
         });
 

@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::utils_tensor::{cross_entropy, dtype};
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
-use candle_core::Device;
+use candle_core::{DType, Device};
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
@@ -46,7 +46,14 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Setup varbuilder
     let varmap = VarMap::new();
-    let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
+    let vb = match args.checkpoint {
+        Some(ref path) => {
+            println!("Loading checkpoint from: {}", path);
+            let safetensors = candle_core::safetensors::load(path, &device)?;
+            VarBuilder::from_tensors(safetensors, DType::F32, &device)
+        }
+        None => VarBuilder::from_varmap(&varmap, dtype, &device),
+    };
 
     // Get the datasets
     let dataset = { Dataset::new("../../karpathy/llama2.c/data/TinyStories_all_data")? };

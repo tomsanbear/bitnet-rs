@@ -25,6 +25,10 @@ extern crate intel_mkl_src;
 
 #[derive(Parser, Debug, Clone)]
 struct InferenceCmd {
+    /// Pretrained model path, only safetensors are supported
+    #[arg(long, default_value = "./checkpoint.safetensors")]
+    pretrained_model_path: String,
+
     /// The temperature used to generate samples.
     #[arg(long)]
     temperature: Option<f64>,
@@ -66,7 +70,7 @@ pub struct TrainingCmd {
     max_steps: usize,
 
     /// The batch size to use
-    #[arg(long, default_value = "2")]
+    #[arg(long, default_value = "1")]
     batch_size: usize,
 
     /// The learning rate to use
@@ -80,6 +84,10 @@ pub struct TrainingCmd {
     /// The number of tokens in the vocabulary
     #[arg(long, default_value = "32000")]
     num_tokens: usize,
+
+    /// The checkpoint file to continue from
+    #[arg(long)]
+    checkpoint: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]

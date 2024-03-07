@@ -23,7 +23,7 @@ impl Config {
             layer_norm_eps: 1e-6,
             bit_attention_eps: 1e-6,
             ff_dropout: 0.1,
-            seq_len: 512,
+            seq_len: 100,
         }
     }
 }
