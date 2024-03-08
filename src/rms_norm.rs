@@ -8,9 +8,9 @@ pub struct RmsNorm {
 }
 
 impl RmsNorm {
-    pub fn load(rms_norm_eps: f64, size: usize, vb: VarBuilder) -> Result<Self> {
+    pub fn load(rms_norm_eps: f32, size: usize, vb: VarBuilder) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "rms-norm");
-        let inner = candle_nn::rms_norm(size, rms_norm_eps, vb)?;
+        let inner = candle_nn::rms_norm(size, rms_norm_eps.into(), vb)?;
         Ok(Self { inner, span })
     }
 }

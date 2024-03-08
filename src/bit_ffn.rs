@@ -48,12 +48,13 @@ impl BitFeedForward {
                 1,
                 8,
                 cfg.eps,
+                true,
                 vb.pp("proj"),
             )?)
             .add(activation);
 
         // Linear layer
-        let linear = Bitlinear::load(inner_dim, cfg.dim, 1, 8, cfg.eps, vb.pp("linear"))?;
+        let linear = Bitlinear::load(inner_dim, cfg.dim, 1, 8, cfg.eps, true, vb.pp("linear"))?;
 
         // Return the layer as a sequential module
         Ok(Self {

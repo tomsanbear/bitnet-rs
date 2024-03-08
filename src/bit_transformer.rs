@@ -27,8 +27,7 @@ impl BitTransformer {
                             kv_heads: 4,
                             dropout: 0.1,
                             layer_norm_enabled: true,
-                            layer_norm_eps: cfg.layer_norm_eps,
-                            bit_attention_eps: cfg.bit_attention_eps,
+                            eps: cfg.eps,
                         },
                         vb.pp(&format!("attn.{i}")),
                     )
@@ -39,7 +38,7 @@ impl BitTransformer {
                             ff_mult: cfg.ff_mult,
                             dropout: cfg.ff_dropout,
                             train,
-                            eps: cfg.layer_norm_eps,
+                            eps: cfg.eps,
                         },
                         vb.pp(&format!("ffn.{i}")),
                     )
@@ -49,7 +48,7 @@ impl BitTransformer {
             .collect();
 
         let to_logits = seq()
-            .add(RmsNorm::load(1e-6, cfg.dim, vb.pp("model.norm"))?)
+            .add(RmsNorm::load(cfg.eps, cfg.dim, vb.pp("model.norm"))?)
             .add(linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?);
 
         Ok(Self {

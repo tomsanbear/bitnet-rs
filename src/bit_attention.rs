@@ -12,8 +12,7 @@ pub struct BitAttentionCfg {
     pub kv_heads: usize,
     pub dropout: f32,
     pub layer_norm_enabled: bool,
-    pub layer_norm_eps: f32,
-    pub bit_attention_eps: f32,
+    pub eps: f32,
 }
 
 pub struct BitAttention {
@@ -69,7 +68,8 @@ impl BitAttention {
             cfg.embed_dim,
             1,
             8,
-            cfg.bit_attention_eps,
+            cfg.eps,
+            true,
             vb.pp("q_proj"),
         )?;
         let k_proj = Bitlinear::load(
@@ -77,7 +77,8 @@ impl BitAttention {
             kv_embed_dim,
             1,
             8,
-            cfg.bit_attention_eps,
+            cfg.eps,
+            true,
             vb.pp("k_proj"),
         )?;
         let v_proj = Bitlinear::load(
@@ -85,14 +86,15 @@ impl BitAttention {
             kv_embed_dim,
             1,
             8,
-            cfg.bit_attention_eps,
+            cfg.eps,
+            true,
             vb.pp("v_proj"),
         )?;
 
         let norm = match cfg.layer_norm_enabled {
             true => {
                 let config = LayerNormConfig {
-                    eps: cfg.layer_norm_eps.into(),
+                    eps: cfg.eps.into(),
                     ..LayerNormConfig::default()
                 };
                 Some(layer_norm(kv_embed_dim, config, vb.pp("norm"))?)
@@ -105,7 +107,8 @@ impl BitAttention {
             cfg.embed_dim,
             1,
             8,
-            cfg.bit_attention_eps,
+            cfg.eps,
+            true,
             vb.pp("out_proj"),
         )?;
 
@@ -202,8 +205,7 @@ mod bit_attention_tests {
         query_heads: 4,
         dropout: 0.1,
         layer_norm_enabled: false,
-        bit_attention_eps: 1e-5,
-        layer_norm_eps: 1e-5,
+        eps: 1e-6,
     };
 
     #[test]

@@ -70,11 +70,13 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
-    let params = ParamsAdamW {
-        lr: args.learning_rate,
-        ..Default::default()
-    };
-    let mut opt = AdamW::new(varmap.all_vars(), params)?;
+    let mut opt = AdamW::new(
+        varmap.all_vars(),
+        ParamsAdamW {
+            lr: args.learning_rate,
+            ..Default::default()
+        },
+    )?;
     let iter = DatasetRandomIter::new(&dataset, false, args.seq_len, device.clone());
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(args.batch_size);
 

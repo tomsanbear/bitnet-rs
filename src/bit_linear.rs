@@ -7,6 +7,7 @@ use tracing::{event, span};
 pub struct Bitlinear {
     num_groups: usize,
     weight: Tensor,
+    bias: Option<Tensor>,
     layer_norm: LayerNorm,
     b: i32,
     eps: f32,
@@ -20,12 +21,13 @@ impl Bitlinear {
         num_groups: usize,
         b: i32,
         eps: f32,
+        bias: bool,
         vb: VarBuilder,
     ) -> candle_core::Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "bit-linear");
         let weight = vb.get_with_hints(
             (out_features, in_features),
-            "weights",
+            "weight",
             Init::Randn {
                 mean: 0.0,
                 stdev: 1.0,
@@ -38,12 +40,17 @@ impl Bitlinear {
             },
             vb.pp("layer_norm"),
         )?;
+        let bias = match bias {
+            true => Some(vb.get_with_hints(out_features, "bias", Init::Const(0.0))?),
+            false => None,
+        };
         Ok(Self {
             span,
             num_groups,
             weight,
             layer_norm,
             b,
+            bias,
             eps,
         })
     }
@@ -52,7 +59,7 @@ impl Bitlinear {
         let span = span!(tracing::Level::TRACE, "ste");
         let _enter = span.enter();
         let binarized_x = sign(x)?;
-        let binarized_x = binarized_x.sub(x)?.add(x)?;
+        let binarized_x = binarized_x.sub(x)?.detach().add(x)?;
         Ok(binarized_x)
     }
 
@@ -138,7 +145,7 @@ impl Module for Bitlinear {
         let binarized_weights = self.binarize_weights_groupwise()?;
 
         // perform linear transformation
-        let output = Linear::from_weights(binarized_weights, None).forward(&x)?;
+        let output = Linear::from_weights(binarized_weights, self.bias.clone()).forward(&x)?;
 
         // quantize activations
         let output = self.quantize_activations(&output)?;
@@ -163,7 +170,7 @@ mod bitlinear_tests {
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 768;
         let out_features = 32;
-        let bl = Bitlinear::load(in_features, out_features, 2, 8, 1e-6, vb)?;
+        let bl = Bitlinear::load(in_features, out_features, 2, 8, 1e-6, true, vb)?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (4, 64, 1024), &device.clone())?;
         let output = bl.forward(&input)?;
         assert_eq!(output.shape().dims2()?, (5, 5));
