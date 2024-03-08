@@ -2,7 +2,9 @@
 extern crate test;
 
 mod bit_attention;
+mod bit_dropout;
 mod bit_ffn;
+mod bit_glu;
 mod bit_linear;
 mod bit_transformer;
 mod config;
@@ -23,6 +25,10 @@ extern crate intel_mkl_src;
 
 #[derive(Parser, Debug, Clone)]
 struct InferenceCmd {
+    /// Pretrained model path, only safetensors are supported
+    #[arg(long, default_value = "./checkpoint.safetensors")]
+    pretrained_model_path: String,
+
     /// The temperature used to generate samples.
     #[arg(long)]
     temperature: Option<f64>,
@@ -55,7 +61,7 @@ pub struct TrainingCmd {
     /// The path to the dataset.
     #[arg(
         long,
-        default_value = "/Users/tomsanbear/workspace/github.com/karpathy/llama2.c/data/TinyStories_all_data"
+        default_value = "../../karpathy/llama2.c/data/TinyStories_all_data"
     )]
     dataset: String,
 
@@ -64,7 +70,7 @@ pub struct TrainingCmd {
     max_steps: usize,
 
     /// The batch size to use
-    #[arg(long, default_value = "4")]
+    #[arg(long, default_value = "1")]
     batch_size: usize,
 
     /// The learning rate to use
@@ -72,12 +78,16 @@ pub struct TrainingCmd {
     learning_rate: f64,
 
     /// The sequence length to use
-    #[arg(long, default_value = "1024")]
+    #[arg(long, default_value = "512")]
     seq_len: usize,
 
     /// The number of tokens in the vocabulary
-    #[arg(long, default_value = "10000")]
+    #[arg(long, default_value = "32000")]
     num_tokens: usize,
+
+    /// The checkpoint file to continue from
+    #[arg(long)]
+    checkpoint: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]

@@ -1,10 +1,10 @@
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
 use crate::utils_tensor::{cross_entropy, dtype};
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
-use candle_core::Device;
+use candle_core::{DType, Device};
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
@@ -53,14 +53,21 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Setup varbuilder
     let varmap = VarMap::new();
-    let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
+    let vb = match args.checkpoint {
+        Some(ref path) => {
+            println!("Loading checkpoint from: {}", path);
+            let safetensors = candle_core::safetensors::load(path, &device)?;
+            VarBuilder::from_tensors(safetensors, DType::F32, &device)
+        }
+        None => VarBuilder::from_varmap(&varmap, dtype, &device),
+    };
 
     // Get the datasets
     let dataset = { Dataset::new("../../karpathy/llama2.c/data/TinyStories_all_data")? };
 
     // Setup the model
     let config = Config::default();
-    let mut model = BitTransformer::load(config, vb, false)?;
+    let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
     let params = ParamsAdamW {
@@ -72,11 +79,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(args.batch_size);
 
     // Training loop
-    for (batch_index, batch) in tqdm!(
-        batch_iter.enumerate(),
-        total = args.max_steps,
-        desc = "Training"
-    ) {
+    for (batch_index, batch) in tqdm!(batch_iter.enumerate(), desc = "Training") {
         let span = tracing::span!(tracing::Level::TRACE, "training-iteration");
         let _enter = span.enter();
         let (inp, tgt) = batch?;
@@ -89,8 +92,8 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
                 valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
             println!("training loss={training_loss}");
             println!("validation loss={validation_loss}");
-            let now = SystemTime::now();
-            let checkpoint_file_name = format!("checkpoint-{:?}.safetensors", now);
+            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+            let checkpoint_file_name = format!("checkpoint-{:?}.safetensors", timestamp);
             varmap.save(checkpoint_file_name)?
         }
     }

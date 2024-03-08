@@ -34,16 +34,31 @@ impl BitAttention {
         let kv_embed_dim = cfg.embed_dim / cfg.query_heads * cfg.kv_heads;
         let head_dim = cfg.embed_dim / cfg.query_heads;
         if cfg.query_heads % cfg.kv_heads != 0 {
-            return Err(anyhow!("query_heads must be divisible by kv_heads"));
+            return Err(anyhow!(
+                "query_heads must be divisible by kv_heads, got: {} and {}",
+                cfg.query_heads,
+                cfg.kv_heads
+            ));
         }
         if (cfg.embed_dim % cfg.query_heads) != 0 {
-            return Err(anyhow!("embed_dim must be divisible by query_heads"));
+            return Err(anyhow!(
+                "embed_dim must be divisible by query_heads, got: {} and {}",
+                cfg.query_heads,
+                cfg.embed_dim
+            ));
         }
         if (cfg.embed_dim % cfg.kv_heads) != 0 {
-            return Err(anyhow!("embed_dim must be divisible by kv_heads"));
+            return Err(anyhow!(
+                "embed_dim must be divisible by kv_heads, got: {} and {}",
+                cfg.kv_heads,
+                cfg.embed_dim
+            ));
         }
         if head_dim % 8 != 0 {
-            return Err(anyhow!("head_dim must be divisible by 8"));
+            return Err(anyhow!(
+                "head_dim must be divisible by 8, got: {}",
+                head_dim
+            ));
         }
         if head_dim > 128 {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
