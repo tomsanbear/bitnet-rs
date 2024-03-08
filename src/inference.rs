@@ -7,9 +7,8 @@ use tokenizers::Tokenizer;
 
 use crate::bit_transformer::BitTransformer;
 use crate::config::Config;
-use crate::token_output_stream::TokenOutputStream;
 use crate::{utils_tensor::device, Args, InferenceCmd};
-use candle_core::{safetensors, DType, Error as E, IndexOp, Tensor};
+use candle_core::{safetensors, DType, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 
 pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
@@ -31,7 +30,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, false)?;
 
     println!("starting the inference loop");
-    let mut logits_processor = LogitsProcessor::new(rng.gen(), args.temperature, args.top_p);
+    let mut logits_processor = LogitsProcessor::new(rng.gen(), args.temperature, Some(args.top_p));
 
     print!("{}", args.prompt);
     let mut tokens = tokenizer
@@ -39,7 +38,11 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
         .unwrap()
         .get_ids()
         .to_vec();
-    let mut tokenizer = TokenOutputStream::new(tokenizer);
+    let mut generated_tokens = 0usize;
+    let eos_token = match tokenizer.get_vocab(true).get("</s>") {
+        Some(token) => *token,
+        None => anyhow::bail!("cannot find the endoftext token"),
+    };
 
     let start_gen = std::time::Instant::now();
     for index in 0.. {
@@ -64,20 +67,18 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
 
         let next_token = logits_processor.sample(&logits)?;
         tokens.push(next_token);
-        if let Some(t) = tokenizer.next_token(next_token)? {
-            print!("{t}");
-            std::io::stdout().flush()?;
+        generated_tokens += 1;
+        if next_token == eos_token {
+            break;
         }
-    }
-    if let Some(rest) = tokenizer.decode_rest().map_err(E::msg)? {
-        print!("{rest}");
+        let token = tokenizer.decode(&[next_token], true).unwrap();
+        print!("{token}");
+        std::io::stdout().flush()?;
     }
     let dt = start_gen.elapsed();
     println!(
-        "\n{} tokens generated ({:.2} token/s)\n",
-        tokens.len(),
-        tokens.len() as f64 / dt.as_secs_f64(),
+        "\n{generated_tokens} tokens generated ({:.2} token/s)",
+        generated_tokens as f64 / dt.as_secs_f64(),
     );
-
     Ok(())
 }

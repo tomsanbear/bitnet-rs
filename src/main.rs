@@ -9,7 +9,6 @@ mod bit_transformer;
 mod config;
 mod inference;
 mod rms_norm;
-mod token_output_stream;
 mod training;
 mod utils_tensor;
 
@@ -33,8 +32,8 @@ struct InferenceCmd {
     temperature: Option<f64>,
 
     /// Nucleus sampling probability cutoff.
-    #[arg(long)]
-    top_p: Option<f64>,
+    #[arg(long, default_value = "0.9")]
+    top_p: f64,
 
     /// The repeat penalty to use
     #[arg(long, default_value = "1.1")]
