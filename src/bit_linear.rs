@@ -36,6 +36,7 @@ impl Bitlinear {
         let layer_norm = layer_norm(
             in_features,
             LayerNormConfig {
+                eps: eps.into(),
                 ..LayerNormConfig::default()
             },
             vb.pp("layer_norm"),

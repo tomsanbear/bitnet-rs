@@ -16,7 +16,7 @@ pub struct BitTransformer {
 impl BitTransformer {
     pub fn load(cfg: Config, vb: VarBuilder, train: bool) -> Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "bit-transformer");
-        let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("model.embed_tokens"))?;
+        let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("embedding"))?;
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {
                 (
@@ -48,8 +48,8 @@ impl BitTransformer {
             .collect();
 
         let to_logits = seq()
-            .add(RmsNorm::load(cfg.eps, cfg.dim, vb.pp("model.norm"))?)
-            .add(linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?);
+            .add(RmsNorm::load(cfg.eps, cfg.dim, vb.pp("rms_norm"))?)
+            .add(linear(cfg.dim, cfg.vocab_size, vb.pp("logits_linear"))?);
 
         Ok(Self {
             span,
