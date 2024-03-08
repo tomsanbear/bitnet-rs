@@ -56,6 +56,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Load vars if checkpoint was provided
     if let Some(checkpoint) = &args.checkpoint {
+        println!("Loading checkpoint: {:?}", checkpoint);
         varmap.load(checkpoint)?;
     }
 
