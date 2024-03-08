@@ -256,7 +256,6 @@ mod scaled_dot_product_gqa_tests {
     use crate::utils_tensor::{device, scaled_dot_product_gqa, ScaledDotProductCfg};
     use anyhow::Result;
     use candle_core::safetensors;
-    use test::Bencher;
 
     macro_rules! python_snapshot_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -323,37 +322,6 @@ mod scaled_dot_product_gqa_tests {
     python_snapshot_tests! {
         it_matches_snapshot_small: "small",
         it_matches_snapshot_large: "large",
-    }
-
-    #[bench]
-    fn bench_scaled_dot_product_gqa(b: &mut Bencher) -> Result<()> {
-        let device = device(true).unwrap();
-        let safetensor =
-            safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
-        let input_tensor = match safetensor.get("small_input") {
-            Some(tensor) => tensor,
-            None => panic!("Input tensor not found"),
-        };
-
-        b.iter(|| {
-            for _ in 1..100 {
-                scaled_dot_product_gqa(
-                    input_tensor.clone(),
-                    input_tensor.clone(),
-                    input_tensor.clone(),
-                    ScaledDotProductCfg {
-                        is_causal: true,
-                        need_weights: true,
-                        average_attn_weights: true,
-                        force_grouped: true,
-                        dropout: 0.0,
-                    },
-                )
-                .unwrap();
-            }
-        });
-
-        Ok(())
     }
 }
 

@@ -1,6 +1,3 @@
-#![feature(test)]
-extern crate test;
-
 mod bit_attention;
 mod bit_dropout;
 mod bit_ffn;
