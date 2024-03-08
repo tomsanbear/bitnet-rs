@@ -1,5 +1,5 @@
-use crate::utils_tensor::{absmean_quantize_weights, sign};
-use candle_core::Tensor;
+use crate::utils_tensor::sign;
+use candle_core::{Tensor, D};
 use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Module, VarBuilder};
 use candle_transformers::models::with_tracing::Linear;
 use tracing::{event, span};
@@ -8,6 +8,8 @@ pub struct Bitlinear {
     num_groups: usize,
     weight: Tensor,
     layer_norm: LayerNorm,
+    b: i32,
+    eps: f32,
     span: tracing::Span,
 }
 
@@ -16,6 +18,8 @@ impl Bitlinear {
         in_features: usize,
         out_features: usize,
         num_groups: usize,
+        b: i32,
+        eps: f32,
         vb: VarBuilder,
     ) -> candle_core::Result<Self> {
         let span = tracing::span!(tracing::Level::TRACE, "bit-linear");
@@ -39,6 +43,8 @@ impl Bitlinear {
             num_groups,
             weight,
             layer_norm,
+            b,
+            eps,
         })
     }
 
@@ -46,7 +52,7 @@ impl Bitlinear {
         let span = span!(tracing::Level::TRACE, "ste");
         let _enter = span.enter();
         let binarized_x = sign(x)?;
-        let binarized_x = binarized_x.sub(x)?.detach().add(x)?;
+        let binarized_x = binarized_x.sub(x)?.add(x)?;
         Ok(binarized_x)
     }
 
@@ -67,6 +73,58 @@ impl Bitlinear {
         let output = Tensor::cat(&bin_weights, 1).unwrap();
         Ok(output)
     }
+
+    fn dequantize_activations(&self, x: &Tensor) -> candle_core::Result<Tensor> {
+        let span = span!(tracing::Level::TRACE, "dequantize-activations");
+        let _enter = span.enter();
+
+        let q_b = 2f32.powi(self.b);
+        let q_b_t = Tensor::new(q_b, x.device())?;
+        let group_size = x.dims()[1] / self.num_groups;
+
+        let mut grouped_results = Vec::with_capacity(self.num_groups);
+        for g in 0..self.num_groups {
+            event!(tracing::Level::TRACE, "dequantize-activations-iter");
+
+            let start_idx = g * group_size;
+            let quantized_group = x.narrow(1, start_idx, group_size)?;
+            let gamma_g = quantized_group.abs()?.max_keepdim(D::Minus1)?;
+            let dequantized_x = quantized_group
+                .broadcast_mul(&gamma_g)?
+                .broadcast_div(&q_b_t)?;
+            grouped_results.push(dequantized_x);
+        }
+        let quantized_x = grouped_results.into_boxed_slice();
+        let output = Tensor::cat(&quantized_x, 1).unwrap();
+        Ok(output)
+    }
+
+    fn quantize_activations(&self, x: &Tensor) -> candle_core::Result<Tensor> {
+        let span = span!(tracing::Level::TRACE, "quantize-activations");
+        let _enter = span.enter();
+
+        let q_b = 2f32.powi(self.b);
+        let q_b_t = Tensor::new(q_b, x.device())?;
+        let group_size = x.dims()[1] / self.num_groups;
+
+        let mut grouped_results = Vec::with_capacity(self.num_groups);
+        for g in 0..self.num_groups {
+            event!(tracing::Level::TRACE, "binarize-weights-groupwise-iter");
+
+            let start_idx = g * group_size;
+            let activation_group = x.narrow(1, start_idx, group_size)?;
+            let gamma_g = activation_group.abs()?.max_keepdim(D::Minus1)?;
+            let quantized_x = activation_group.broadcast_mul(&q_b_t)?;
+            let quantized_x = quantized_x.broadcast_div(
+                &(gamma_g.broadcast_add(&Tensor::new(self.eps, quantized_x.device())?)?),
+            )?;
+            let quantized_x = quantized_x.clamp(-q_b + self.eps, q_b - self.eps)?;
+            grouped_results.push(quantized_x);
+        }
+        let quantized_x = grouped_results.into_boxed_slice();
+        let output = Tensor::cat(&quantized_x, 1).unwrap();
+        Ok(output)
+    }
 }
 
 impl Module for Bitlinear {
@@ -83,7 +141,10 @@ impl Module for Bitlinear {
         let output = Linear::from_weights(binarized_weights, None).forward(&x)?;
 
         // quantize activations
-        let output = absmean_quantize_weights(&output)?;
+        let output = self.quantize_activations(&output)?;
+
+        // dequantize activations
+        let output = self.dequantize_activations(&output)?;
 
         Ok(output)
     }
@@ -102,7 +163,7 @@ mod bitlinear_tests {
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 768;
         let out_features = 32;
-        let bl = Bitlinear::load(in_features, out_features, 2, vb)?;
+        let bl = Bitlinear::load(in_features, out_features, 2, 8, 1e-6, vb)?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (4, 64, 1024), &device.clone())?;
         let output = bl.forward(&input)?;
         assert_eq!(output.shape().dims2()?, (5, 5));

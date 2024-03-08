@@ -64,12 +64,8 @@ pub struct TrainingCmd {
     )]
     dataset: String,
 
-    /// The maxiumum steps to train for
-    #[arg(long, default_value = "10000")]
-    max_steps: usize,
-
     /// The batch size to use
-    #[arg(long, default_value = "1")]
+    #[arg(long, default_value = "2")]
     batch_size: usize,
 
     /// The learning rate to use

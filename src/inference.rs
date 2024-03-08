@@ -2,6 +2,7 @@ use std::io::Write;
 
 use anyhow::Result;
 use candle_transformers::generation::LogitsProcessor;
+use rand::Rng;
 use tokenizers::Tokenizer;
 
 use crate::bit_transformer::BitTransformer;
@@ -12,6 +13,8 @@ use candle_core::{safetensors, DType, Error as E, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 
 pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
+    let mut rng = rand::thread_rng();
+
     let tokenizer = {
         let api = hf_hub::api::sync::Api::new()?;
         let api = api.model("hf-internal-testing/llama-tokenizer".to_string());
@@ -28,7 +31,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, false)?;
 
     println!("starting the inference loop");
-    let mut logits_processor = LogitsProcessor::new(299792458, args.temperature, args.top_p);
+    let mut logits_processor = LogitsProcessor::new(rng.gen(), args.temperature, args.top_p);
 
     print!("{}", args.prompt);
     let mut tokens = tokenizer

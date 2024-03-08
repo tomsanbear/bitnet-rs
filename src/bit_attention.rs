@@ -12,8 +12,8 @@ pub struct BitAttentionCfg {
     pub kv_heads: usize,
     pub dropout: f32,
     pub layer_norm_enabled: bool,
-    pub layer_norm_eps: f64,
-    pub bit_attention_eps: f64,
+    pub layer_norm_eps: f32,
+    pub bit_attention_eps: f32,
 }
 
 pub struct BitAttention {
@@ -64,14 +64,35 @@ impl BitAttention {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
         }
 
-        let q_proj = Bitlinear::load(cfg.embed_dim, cfg.embed_dim, 1, vb.pp("q_proj"))?;
-        let k_proj = Bitlinear::load(cfg.embed_dim, kv_embed_dim, 1, vb.pp("k_proj"))?;
-        let v_proj = Bitlinear::load(cfg.embed_dim, kv_embed_dim, 1, vb.pp("v_proj"))?;
+        let q_proj = Bitlinear::load(
+            cfg.embed_dim,
+            cfg.embed_dim,
+            1,
+            8,
+            cfg.bit_attention_eps,
+            vb.pp("q_proj"),
+        )?;
+        let k_proj = Bitlinear::load(
+            cfg.embed_dim,
+            kv_embed_dim,
+            1,
+            8,
+            cfg.bit_attention_eps,
+            vb.pp("k_proj"),
+        )?;
+        let v_proj = Bitlinear::load(
+            cfg.embed_dim,
+            kv_embed_dim,
+            1,
+            8,
+            cfg.bit_attention_eps,
+            vb.pp("v_proj"),
+        )?;
 
         let norm = match cfg.layer_norm_enabled {
             true => {
                 let config = LayerNormConfig {
-                    eps: cfg.layer_norm_eps,
+                    eps: cfg.layer_norm_eps.into(),
                     ..LayerNormConfig::default()
                 };
                 Some(layer_norm(kv_embed_dim, config, vb.pp("norm"))?)
@@ -79,7 +100,14 @@ impl BitAttention {
             false => None,
         };
 
-        let out_proj = Bitlinear::load(kv_embed_dim, cfg.embed_dim, 1, vb.pp("out_proj"))?;
+        let out_proj = Bitlinear::load(
+            kv_embed_dim,
+            cfg.embed_dim,
+            1,
+            8,
+            cfg.bit_attention_eps,
+            vb.pp("out_proj"),
+        )?;
 
         Ok(BitAttention {
             span,

@@ -85,8 +85,12 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
-        opt.backward_step(&loss)?;
-        if batch_index > 0 && batch_index % 100 == 0 {
+        {
+            let span = tracing::span!(tracing::Level::TRACE, "backward_step");
+            let _enter = span.enter();
+            opt.backward_step(&loss)?;
+        }
+        if batch_index > 0 && batch_index % 10 == 0 {
             let training_loss = f64::from(loss.to_vec0::<f32>()?);
             let validation_loss =
                 valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;

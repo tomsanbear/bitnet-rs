@@ -8,7 +8,7 @@ pub struct BitFeedForwardCfg {
     pub ff_mult: usize,
     pub dropout: f32,
     pub train: bool,
-    pub eps: f64,
+    pub eps: f32,
 }
 
 pub struct BitFeedForward {
@@ -34,7 +34,7 @@ impl BitFeedForward {
         let norm = layer_norm(
             inner_dim,
             LayerNormConfig {
-                eps: cfg.eps,
+                eps: cfg.eps.into(),
                 ..LayerNormConfig::default()
             },
             vb.pp("norm"),
@@ -42,11 +42,18 @@ impl BitFeedForward {
 
         // Setup the GLU function
         let proj = seq()
-            .add(Bitlinear::load(cfg.dim, inner_dim, 1, vb.pp("proj"))?)
+            .add(Bitlinear::load(
+                cfg.dim,
+                inner_dim,
+                1,
+                8,
+                cfg.eps,
+                vb.pp("proj"),
+            )?)
             .add(activation);
 
         // Linear layer
-        let linear = Bitlinear::load(inner_dim, cfg.dim, 1, vb.pp("linear"))?;
+        let linear = Bitlinear::load(inner_dim, cfg.dim, 1, 8, cfg.eps, vb.pp("linear"))?;
 
         // Return the layer as a sequential module
         Ok(Self {

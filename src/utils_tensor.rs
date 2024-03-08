@@ -357,16 +357,6 @@ mod scaled_dot_product_gqa_tests {
     }
 }
 
-pub fn absmean_quantize_weights(output: &Tensor) -> candle_core::Result<Tensor> {
-    let span = tracing::span!(tracing::Level::TRACE, "absmean-quantize-weights");
-    let _enter = span.enter();
-    let gamma = output.abs()?;
-    let gamma = gamma.mean_all()?;
-    let quantized_weights = output.broadcast_div(&gamma)?;
-    let quantized_weights = sign(&quantized_weights.round()?)?;
-    Ok(quantized_weights)
-}
-
 // Wrapper on cross entropy to add tracing
 pub fn cross_entropy(inp: &Tensor, target: &Tensor) -> candle_core::Result<Tensor> {
     let span = tracing::span!(tracing::Level::TRACE, "cross-entropy");
