@@ -254,7 +254,6 @@ pub fn scaled_dot_product_gqa(
 #[cfg(test)]
 mod scaled_dot_product_gqa_tests {
     use crate::utils_tensor::{device, scaled_dot_product_gqa, ScaledDotProductCfg};
-    use anyhow::Result;
     use candle_core::safetensors;
 
     macro_rules! python_snapshot_tests {
