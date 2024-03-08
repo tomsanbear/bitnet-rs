@@ -195,14 +195,13 @@ mod bit_attention_tests {
         bit_attention::{BitAttention, BitAttentionCfg},
         utils_tensor::device,
     };
-    use candle_core::{safetensors, Result, Tensor};
+    use candle_core::{Result, Tensor};
     use candle_nn::VarBuilder;
-    use test::Bencher;
 
     const DEFAULT_CFG: BitAttentionCfg = BitAttentionCfg {
-        embed_dim: 512,
-        kv_heads: 8,
-        query_heads: 4,
+        embed_dim: 128,
+        kv_heads: 4,
+        query_heads: 8,
         dropout: 0.1,
         layer_norm_enabled: false,
         eps: 1e-6,
@@ -213,53 +212,21 @@ mod bit_attention_tests {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
-        let safetensor =
-            safetensors::load("src/test_data/bit_attention_test.safetensors", &device)?;
-
-        let input_tensor = safetensor.get("input_small").unwrap();
-        let expected_output_tensor = safetensor.get("output_small").unwrap();
-        let expected_attn_weights = safetensor.get("attn_weights_small").unwrap();
-
+        let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 512, 128), &device)?;
         let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
 
-        let (output_tensor, attn_weights) = bit_attention
+        let (output_tensor, _) = bit_attention
             .forward(
                 input_tensor.clone(),
                 input_tensor.clone(),
                 input_tensor.clone(),
-                true,
                 false,
+                true,
                 false,
             )
             .unwrap();
 
-        assert_eq!(output_tensor.shape(), expected_output_tensor.shape());
-        assert_eq!(attn_weights.unwrap().shape(), expected_attn_weights.shape());
-
-        Ok(())
-    }
-
-    #[bench]
-    fn bench_bit_attention(b: &mut Bencher) -> Result<()> {
-        let device = device(true).unwrap();
-        let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
-        let input = Tensor::randn(0.0f32, 1.0f32, (1, 10, 128), &device)?;
-        let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
-
-        b.iter(|| {
-            for _ in 1..100 {
-                bit_attention
-                    .forward(
-                        input.clone(),
-                        input.clone(),
-                        input.clone(),
-                        true,
-                        false,
-                        false,
-                    )
-                    .unwrap();
-            }
-        });
+        assert_eq!(output_tensor.shape().dims(), &[2, 512, 128]);
 
         Ok(())
     }

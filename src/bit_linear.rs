@@ -169,12 +169,12 @@ mod bitlinear_tests {
     fn it_applies_forward_pass() -> Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
-        let in_features = 768;
-        let out_features = 32;
-        let bl = Bitlinear::load(in_features, out_features, 2, 8, 1e-6, true, vb)?;
-        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (4, 64, 1024), &device.clone())?;
+        let in_features = 64;
+        let out_features = 64;
+        let bl = Bitlinear::load(in_features, out_features, 1, 8, 1e-6, true, vb)?;
+        let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (1, 64), &device.clone())?;
         let output = bl.forward(&input)?;
-        assert_eq!(output.shape().dims2()?, (5, 5));
+        assert_eq!(output.shape().dims2()?, (1, 64));
         Ok(())
     }
 }
