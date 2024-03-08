@@ -94,7 +94,7 @@ mod bitnet_transformer_tests {
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
-        let device = &device(false)?;
+        let device = &device(true)?;
         let vb = VarBuilder::zeros(DType::F32, device);
         let mut t = BitTransformer::load(Config::default(), vb, true)?;
         let x = Tensor::ones((1, 128), DType::U32, device)?;
