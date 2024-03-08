@@ -73,8 +73,7 @@ impl BitTransformer {
                 .unwrap();
             let x = x.add(&x_embed).unwrap();
             let x = ffn.forward(&x).unwrap();
-            let x = x.add(&x).unwrap();
-            x
+            x.add(&x).unwrap()
         });
 
         // Convert to logits

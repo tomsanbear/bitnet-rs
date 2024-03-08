@@ -4,7 +4,6 @@ extern crate test;
 mod bit_attention;
 mod bit_dropout;
 mod bit_ffn;
-mod bit_glu;
 mod bit_linear;
 mod bit_transformer;
 mod config;
