@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use candle_core::utils::{cuda_is_available, metal_is_available};
 use candle_core::{DType, Device, Tensor, D};
+use candle_einops::einops;
 use candle_nn::ops::softmax;
 use candle_nn::Dropout;
 use tracing::{event, Level};
@@ -104,15 +105,9 @@ pub fn scaled_dot_product_gqa(
         return Err(anyhow!("Input tensors must have 4 dimensions"));
     };
 
-    // Move sequence length dimension to axis 2, this makes it faster in torch
-    // "b n h d -> b h n d"
-    let query = query.permute([0, 2, 1, 3])?;
-
-    // "b s h d -> b h s d"
-    let key = key.permute([0, 2, 1, 3])?;
-
-    // "b s h d -> b h s d"
-    let value = value.permute([0, 2, 1, 3])?;
+    let query = einops!("b n h d -> b h n d", &query);
+    let key = einops!("b s h d -> b h s d", &key);
+    let value = einops!("b s h d -> b h s d", &value);
 
     // Extract the dimensions
     let (bq, hq, _nq, dq) = query.dims4()?;
@@ -149,14 +144,11 @@ pub fn scaled_dot_product_gqa(
         true => {
             // query = rearrange(query, "b (h g) n d -> b g h n d", g=num_head_groups)
             // similarity = einsum(query, key, "b g h n d, b h s d -> b h n s")
-            let (batch_size, heads, seq_len, depth) = query.dims4()?;
-            let heads = heads / num_head_groups; // Calculate the number of heads per group.
-
-            // Reshape query to [batch, num_head_groups, heads, seq_len, depth]
-            let query_reshaped =
-                query.reshape((batch_size, num_head_groups, heads, seq_len, depth))?;
-
-            let query_for_matmul = query_reshaped.sum(1)?;
+            let query = einops!(
+                "b (h {num_head_groups}) n d -> b {num_head_groups} h n d",
+                &query
+            );
+            let query_for_matmul = query.sum(1)?;
 
             // Transpose the last two dimensions of key to align them for matmul.
             let key_transposed = key.transpose(D::Minus2, D::Minus1)?; // [batch, heads, depth, seq_len]
