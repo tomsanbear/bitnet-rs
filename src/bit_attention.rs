@@ -188,7 +188,7 @@ mod bit_attention_tests {
 
     const DEFAULT_CFG: BitAttentionCfg = BitAttentionCfg {
         embed_dim: 128,
-        kv_heads: 4,
+        kv_heads: 8,
         query_heads: 8,
         dropout: 0.1,
         layer_norm_enabled: false,
