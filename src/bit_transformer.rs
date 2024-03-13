@@ -24,7 +24,7 @@ impl BitTransformer {
                         BitAttentionCfg {
                             embed_dim: cfg.dim,
                             query_heads: cfg.heads,
-                            kv_heads: 4,
+                            kv_heads: 8,
                             dropout: 0.1,
                             layer_norm_enabled: true,
                             eps: cfg.eps,
@@ -67,9 +67,7 @@ impl BitTransformer {
 
         // Fold each block forward
         let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
-            let (x, _) = attn
-                .forward(x.clone(), x.clone(), x.clone(), false, true, false)
-                .unwrap();
+            let x = attn.forward(&x, &x, &x, true).unwrap();
             let x = x.add(&x_embed).unwrap();
             let x = ffn.forward(&x).unwrap();
             x.add(&x).unwrap()

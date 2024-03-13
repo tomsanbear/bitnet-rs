@@ -14,7 +14,7 @@ impl Config {
     // Default configuration for initial evaluation, will add larger configs later after confirming valid output
     pub fn default() -> Self {
         Self {
-            dim: 128,
+            dim: 256,
             depth: 8,
             vocab_size: 32000,
             heads: 8,

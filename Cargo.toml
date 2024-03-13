@@ -29,6 +29,7 @@ cudarc = {version="0.10.0", optional = true}
 candle-onnx = {version="0.4.1", optional = true}
 anyhow = "1.0.80"
 candle-einops = "0.1.0"
+candle-ext = "0.1.7"
 
 [build-dependencies]
 bindgen_cuda = { version = "0.1.1", optional = true }
@@ -37,7 +38,7 @@ bindgen_cuda = { version = "0.1.1", optional = true }
 [features]
 default = []
 accelerate = ["dep:accelerate-src", "candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
-cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:bindgen_cuda"]
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:bindgen_cuda", "candle-ext/cuda"]
 cudnn = ["candle-core/cudnn"]
 flash-attn = ["cuda", "candle-transformers/flash-attn", "dep:candle-flash-attn"]
 mkl = ["dep:intel-mkl-src", "candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]

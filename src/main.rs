@@ -65,7 +65,7 @@ pub struct TrainingCmd {
     batch_size: usize,
 
     /// The learning rate to use
-    #[arg(long, default_value = "2e-4")]
+    #[arg(long, default_value = "8e-4")]
     learning_rate: f64,
 
     /// The sequence length to use

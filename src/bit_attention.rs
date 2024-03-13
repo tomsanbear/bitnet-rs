@@ -1,9 +1,7 @@
-use crate::{
-    bit_linear::Bitlinear,
-    utils_tensor::{scaled_dot_product_gqa, ScaledDotProductCfg},
-};
+use crate::{bit_linear::Bitlinear, utils_tensor::scaled_dot_product_attention};
 use anyhow::{anyhow, Result};
 use candle_core::Tensor;
+use candle_einops::einops;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
 
 pub struct BitAttentionCfg {
@@ -127,13 +125,11 @@ impl BitAttention {
 
     pub fn forward(
         &self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        need_weights: bool,
+        query: &Tensor,
+        key: &Tensor,
+        value: &Tensor,
         is_causal: bool,
-        average_attn_weights: bool,
-    ) -> Result<(Tensor, Option<Tensor>)> {
+    ) -> Result<Tensor> {
         let _enter = self.span.enter();
 
         // shape (b, n, d)
@@ -159,33 +155,25 @@ impl BitAttention {
             v.reshape((batch_size, num_queries, self.kv_heads, depth_per_head))?
         };
 
-        let (x, attn_weights) = scaled_dot_product_gqa(
-            q,
-            k,
-            v,
-            ScaledDotProductCfg {
-                is_causal,
-                need_weights,
-                average_attn_weights,
-                force_grouped: false,
-                dropout: self.dropout,
-            },
+        let scale = (*query.dims().last().unwrap() as f64).sqrt();
+        let x = scaled_dot_product_attention(
+            &q,
+            &k,
+            &v,
+            None,
+            Some(self.dropout),
+            Some(is_causal),
+            Some(scale),
         )?;
-
-        // x = rearrange(x, "b n h d -> b n (h d)")
-        let x_dims = x.dims4()?;
-        let x = x.reshape((x_dims.0, x_dims.1, x_dims.2 * x_dims.3))?;
-
-        // Original source mentions the magneto paper, need to read on this and the impact
+        let x = einops!("b n h d -> b n (h d)", x);
         let x = match self.norm {
             Some(ref norm) => norm.forward(&x)?,
             None => x,
         };
 
-        // Linear projection on the attn outputs
         let x = self.out_proj.forward(&x)?;
 
-        Ok((x, attn_weights))
+        Ok(x)
     }
 }
 
@@ -215,15 +203,8 @@ mod bit_attention_tests {
         let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 512, 128), &device)?;
         let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
 
-        let (output_tensor, _) = bit_attention
-            .forward(
-                input_tensor.clone(),
-                input_tensor.clone(),
-                input_tensor.clone(),
-                false,
-                true,
-                false,
-            )
+        let output_tensor = bit_attention
+            .forward(&input_tensor, &input_tensor, &input_tensor, true)
             .unwrap();
 
         assert_eq!(output_tensor.shape().dims(), &[2, 512, 128]);

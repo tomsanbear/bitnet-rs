@@ -1,10 +1,8 @@
 use anyhow::{anyhow, Result};
 use candle_core::utils::{cuda_is_available, metal_is_available};
-use candle_core::{DType, Device, Tensor, D};
-use candle_einops::einops;
-use candle_nn::ops::softmax;
-use candle_nn::Dropout;
-use tracing::{event, Level};
+use candle_core::{DType, Device, Shape, Tensor, WithDType, D};
+use candle_nn::ops::{self};
+use tracing::{event, span, Level};
 
 // Transform the input values of the tensor to it's signs, -1, 0 or 1
 pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
@@ -87,234 +85,149 @@ pub fn dtype(device: &Device) -> Result<candle_core::DType> {
     }
 }
 
-pub struct ScaledDotProductCfg {
-    pub is_causal: bool,
-    pub need_weights: bool,
-    pub average_attn_weights: bool,
-    pub force_grouped: bool,
-    pub dropout: f32,
+pub fn full<S: Into<Shape>, D: WithDType>(
+    shape: S,
+    fill_value: D,
+    dtype: DType,
+    device: &Device,
+) -> candle_core::Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "full");
+    let _enter = span.enter();
+
+    Tensor::new(&[fill_value], device)?
+        .to_dtype(dtype)?
+        .broadcast_as(shape)
 }
 
-pub fn scaled_dot_product_gqa(
-    query: Tensor, // (b, n, h, d)
-    key: Tensor,   // (b, s, h, d)
-    value: Tensor, // (b, s, h, d)
-    cfg: ScaledDotProductCfg,
-) -> Result<(Tensor, Option<Tensor>), anyhow::Error> {
-    if query.dims().len() != 4 || key.dims().len() != 4 || value.dims().len() != 4 {
-        return Err(anyhow!("Input tensors must have 4 dimensions"));
-    };
+pub fn full_like<D: WithDType>(input: &Tensor, fill_value: D) -> candle_core::Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "full-like");
+    let _enter = span.enter();
 
-    let query = einops!("b n h d -> b h n d", &query);
-    let key = einops!("b s h d -> b h s d", &key);
-    let value = einops!("b s h d -> b h s d", &value);
-
-    // Extract the dimensions
-    let (bq, hq, _nq, dq) = query.dims4()?;
-    let (bk, hk, nk, dk) = key.dims4()?;
-    let (bv, hv, nv, dv) = value.dims4()?;
-
-    // All batch sizes must be equal
-    if !(bq == bk && bq == bv) {
-        return Err(anyhow!("Batch sizes must be equal"));
-    };
-
-    // All dimension sizes must be equal
-    if !(dq == dk && dq == dv) {
-        return Err(anyhow!("Dimension sizes must be equal"));
-    };
-
-    // key and value should have same size in dim 1 and 2
-    if nk != nv || hk != hv {
-        return Err(anyhow!(
-            "Key and value should have same size in dim 1 and 2"
-        ));
-    };
-
-    // Query heads must be a multiple of kv heads
-    if hq % hk != 0 {
-        return Err(anyhow!("Query heads must be a multiple of key/value heads"));
-    };
-
-    let scale = (*query.dims().last().unwrap() as f64).sqrt();
-    let query = (query / scale)?;
-    let num_head_groups = hq / hk;
-
-    let similarity = match num_head_groups > 1 || cfg.force_grouped {
-        true => {
-            // Original python code:
-            // query = rearrange(query, "b (h g) n d -> b g h n d", g=num_head_groups)
-            // similarity = einsum(query, key, "b g h n d, b h s d -> b h n s")
-            let query = einops!(
-                "b (h {num_head_groups}) n d -> b {num_head_groups} h n d",
-                &query
-            );
-            let query_for_matmul = query.sum(1)?;
-
-            // Transpose the last two dimensions of key to align them for matmul.
-            let key_transposed = key.transpose(D::Minus2, D::Minus1)?; // [batch, heads, depth, seq_len]
-
-            // Perform batched matrix multiplication.
-            query_for_matmul.matmul(&key_transposed.contiguous()?)
-        }
-        false => {
-            // If the number of query/key heads is equal, we can skip grouping the queries,
-            // and just use the standard sdot product attention.
-            // einsum(query, key, "b h n d, b h s d -> b h n s")
-            let query = query.unsqueeze(3)?;
-            let key_t = key.transpose(D::Minus2, D::Minus1)?;
-            query.matmul(&key_t)
-        }
-    }?;
-
-    // Apply mask if causal attention is required
-    let mask = match cfg.is_causal {
-        true => {
-            // Mask out the upper triangular portion of the attention matrix. This prevents
-            // the model from attending to tokens in the future
-            let mask = Tensor::zeros(similarity.shape(), DType::U8, similarity.device())?;
-            Some(mask)
-        }
-        false => None,
-    };
-
-    // Expand mask to match the shape of the attn matrix
-    let mask = match mask {
-        Some(mask) => Some({
-            if mask.shape().dims().len() == 2 {
-                mask.unsqueeze(1)?.unsqueeze(2)?
-            } else if mask.dims().len() == 3 {
-                mask.unsqueeze(1)?
-            } else {
-                mask
-            }
-        }),
-        None => None,
-    };
-
-    let similarity = match mask {
-        Some(mask) => {
-            let on_true = Tensor::zeros_like(&similarity)?;
-            mask.where_cond(&on_true, &similarity)?
-        }
-        None => similarity,
-    };
-
-    // attention = F.softmax(similarity / scale, dim=-1)
-    let attention = softmax(&(similarity / scale)?, D::Minus1)?;
-
-    // apply dropout
-    let attention = match cfg.dropout > 0.0 {
-        true => {
-            // Original python code:
-            // attention = F.dropout(attention, p=dropout, training=self.training)
-            Dropout::new(cfg.dropout).forward(&attention, false)?
-        }
-        false => attention,
-    };
-
-    // Apply attention matrix to the value Tensor.
-    // out = einsum(attention, value, "b h n s, b h s d -> b h n d")
-    let out = attention.matmul(&value.contiguous()?)?;
-
-    // Move head dimension back to axis 2
-    // out = rearrange(out, "b h n d -> b n h d")
-    let out = einops!("b h n d -> b n h d", &out);
-
-    let attn_weights = match cfg.need_weights {
-        false => None,
-        true => {
-            // Move the sequence dimensions back to positions 1, 2.  Move the head dimension
-            // to position 3.  This more closely matches the return shape of the attention
-            // output: (b, n, h, d).
-            // python code:
-            // attn_weights = rearrange(attention, "b h n s -> b n s h")
-            let attn_weights = einops!("b h n s -> b n s h", &attention);
-            // if average_attn_weights:
-            //   attn_weights = attn_weights.mean(dim=1)
-            if cfg.average_attn_weights {
-                let attn_weights = attn_weights.mean_keepdim(1)?;
-                Some(attn_weights)
-            } else {
-                Some(attn_weights)
-            }
-        }
-    };
-
-    Ok((out, attn_weights))
+    full(input.shape(), fill_value, input.dtype(), input.device())
 }
 
-#[cfg(test)]
-mod scaled_dot_product_gqa_tests {
-    use crate::utils_tensor::{device, scaled_dot_product_gqa, ScaledDotProductCfg};
-    use candle_core::safetensors;
+pub fn masked_fill<D: WithDType>(
+    xs: &Tensor,
+    mask: &Tensor,
+    value: D,
+) -> candle_core::Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "masked-fill");
+    let _enter = span.enter();
 
-    macro_rules! python_snapshot_tests {
-        ($($name:ident: $value:expr,)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let input = $value;
+    let on_true = full_like(xs, value)?;
+    let on_false = xs;
+    mask.broadcast_as(xs.shape())?
+        .where_cond(&on_true, on_false)
+}
 
-                    let device = device(true).unwrap();
-                    let safetensor =
-                        safetensors::load("src/test_data/scaled_dot_product_gqa.safetensors", &device).unwrap();
-                    let input_tensor_name = format!("{}_input", input);
-                    let input_tensor = match safetensor.get(input_tensor_name.as_str()) {
-                        Some(tensor) => tensor,
-                        None => panic!("Input tensor not found"),
-                    };
+fn apply_triangular(xs: &Tensor, diagonal: isize, upper: bool) -> candle_core::Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "apply-triangular");
+    let _enter = span.enter();
 
-                    let output_tensor_name = format!("{}_output", input);
-                    let expected_output = match safetensor.get(output_tensor_name.as_str()) {
-                        Some(tensor) => tensor,
-                        None => panic!("Output tensor not found"),
-                    };
+    let device = xs.device();
+    let (l, s) = xs.dims2()?;
+    let mut xs_tri = vec![];
+    for i in 0..l as isize {
+        for j in 0..s as isize {
+            let cond = if upper {
+                i + diagonal > j
+            } else {
+                i + diagonal < j
+            };
+            xs_tri.push(if cond { 0u8 } else { 1u8 });
+        }
+    }
+    xs * Tensor::from_vec(xs_tri, (l, s), device)?.to_dtype(xs.dtype())?
+}
 
-                    let attn_weights_tensor_name = format!("{}_attn_weights", input);
-                    let expected_attn_weights = match safetensor.get(attn_weights_tensor_name.as_str()) {
-                        Some(tensor) => tensor,
-                        None => panic!("Output tensor not found"),
-                    };
+pub fn logical_not(xs: &Tensor) -> Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "logical-not");
+    let _enter = span.enter();
 
-                    let (out, attn_weights) = scaled_dot_product_gqa(input_tensor.clone(), input_tensor.clone(), input_tensor.clone(), ScaledDotProductCfg {
-                        is_causal: true,
-                        need_weights: true,
-                        average_attn_weights: true,
-                        force_grouped: true,
-                        dropout: 0.0,
-                    }).unwrap();
-                    let attn_weights = attn_weights.unwrap();
+    let out = xs.where_cond(&xs.zeros_like()?, &xs.ones_like()?)?;
+    Ok(out)
+}
 
-                    assert_eq!(
-                        out.shape().dims(),
-                        expected_output.shape().dims(),
-                        "output shape mismatch"
-                    );
-                    assert_eq!(
-                        out.squeeze(0).unwrap().to_vec3::<f32>().unwrap(),
-                        expected_output.squeeze(0).unwrap().to_vec3::<f32>().unwrap(),
-                        "output value mismatch"
-                    );
-                    assert_eq!(
-                        attn_weights.shape().dims(),
-                        expected_attn_weights.shape().dims(),
-                        "attn_weights shape mismatch"
-                    );
-                    assert_eq!(
-                        attn_weights.squeeze(0).unwrap().to_vec3::<f32>().unwrap(),
-                        expected_attn_weights.squeeze(0).unwrap().to_vec3::<f32>().unwrap(),
-                        "attn_weights value mismatch"
-                    );
-                }
-            )*
+// Modified to force the dropout datatype to be something supported on metal
+pub fn dropout(xs: &Tensor, drop_p: f32) -> candle_core::Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "dropout");
+    let _enter = span.enter();
+
+    // This implementation is inefficient as it stores the full mask for the backward pass.
+    // Instead we could just store the seed and have a specialized kernel that would both
+    // generate the random mask and apply it.
+    // Another easier optimization would be to be able to generate boolean mask using just a bit of
+    // entropy per element rather than generating a full float per element.
+    if !(0. ..1.).contains(&drop_p) {
+        candle_core::bail!("dropout probability has to be in [0, 1), got {drop_p}")
+    }
+    let rand = Tensor::rand(0f32, 1f32, xs.shape(), xs.device())?;
+    let scale = 1.0 / (1.0 - drop_p as f64);
+    let drop_p = Tensor::new(drop_p, xs.device())?.broadcast_as(xs.shape())?;
+    let mask = (rand.ge(&drop_p)?.to_dtype(DType::F32)? * scale)?.to_dtype(xs.dtype())?;
+    xs * mask
+}
+
+pub fn scaled_dot_product_attention(
+    query: &Tensor,
+    key: &Tensor,
+    value: &Tensor,
+    attn_mask: Option<&Tensor>,
+    dropout_p: Option<f32>,
+    is_causal: Option<bool>,
+    scale: Option<f64>,
+) -> Result<Tensor> {
+    let span = span!(tracing::Level::TRACE, "scaled-dot-product-attention");
+    let _enter = span.enter();
+
+    let device = query.device();
+    let l = query.dim(D::Minus2)?;
+    let s = key.dim(D::Minus2)?;
+    let dim = query.dim(D::Minus1)?;
+
+    let scale_factor = if let Some(scale) = scale {
+        scale
+    } else {
+        1.0 / (dim as f64).sqrt()
+    };
+
+    let mut attn_bias = Tensor::zeros((l, s), query.dtype(), device)?;
+
+    if matches!(is_causal, Some(true)) {
+        assert!(attn_mask.is_none(), "scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
+        let mask = apply_triangular(&Tensor::ones((l, s), DType::U8, device)?, 0, false)?;
+        attn_bias = masked_fill(&attn_bias, &logical_not(&mask)?, f32::NEG_INFINITY)?;
+    }
+
+    if let Some(attn_mask) = attn_mask {
+        if attn_mask.rank() > attn_bias.rank() {
+            attn_bias = attn_bias.broadcast_as(attn_mask.shape())?;
+        }
+        if attn_mask.dtype() == DType::U8 {
+            // bool
+            attn_bias = masked_fill(&attn_bias, &logical_not(attn_mask)?, f32::NEG_INFINITY)?;
+        } else {
+            attn_bias = (&attn_bias
+                + attn_mask
+                    .to_dtype(attn_bias.dtype())?
+                    .broadcast_as(attn_bias.shape())?)?;
         }
     }
 
-    python_snapshot_tests! {
-        it_matches_snapshot_small: "small",
-        it_matches_snapshot_large: "large",
+    let mut attn_weights =
+        (query.matmul(&key.transpose(D::Minus2, D::Minus1)?.contiguous()?)? * scale_factor)?;
+
+    attn_weights = (&attn_weights + attn_bias.broadcast_as(attn_weights.shape())?)?;
+    attn_weights = ops::softmax_last_dim(&attn_weights)?;
+    if let Some(drop_p) = dropout_p {
+        attn_weights = if attn_weights.device().is_metal() {
+            dropout(&attn_weights, drop_p)
+        } else {
+            ops::dropout(&attn_weights, drop_p)
+        }?;
     }
+    let out = attn_weights.matmul(value)?;
+    Ok(out)
 }
 
 // Wrapper on cross entropy to add tracing
