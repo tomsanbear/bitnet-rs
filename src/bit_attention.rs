@@ -1,4 +1,7 @@
-use crate::{bit_linear::Bitlinear, utils_tensor::scaled_dot_product_attention};
+use crate::{
+    bit_linear::{Bitlinear, BitlinearCfg},
+    utils_tensor::scaled_dot_product_attention,
+};
 use anyhow::{anyhow, Result};
 use candle_core::{Tensor, D};
 use candle_einops::einops;
@@ -64,12 +67,14 @@ impl BitAttention {
 
         let total_head_dim = (cfg.n_heads + (2 * cfg.n_kv_heads)) * head_dim;
         let qkv_proj = Bitlinear::load(
-            cfg.dim,
-            total_head_dim,
-            1,
-            8,
-            cfg.eps,
-            cfg.bias,
+            BitlinearCfg {
+                in_features: cfg.dim,
+                out_features: total_head_dim,
+                num_groups: 1,
+                b: 8,
+                eps: cfg.eps,
+                bias: true,
+            },
             vb.pp("qkv_proj"),
         )?;
 
@@ -88,7 +93,17 @@ impl BitAttention {
             false => None,
         };
 
-        let o_proj = Bitlinear::load(cfg.dim, cfg.dim, 1, 8, cfg.eps, true, vb.pp("o_proj"))?;
+        let o_proj = Bitlinear::load(
+            BitlinearCfg {
+                in_features: cfg.dim,
+                out_features: cfg.dim,
+                num_groups: 1,
+                b: 8,
+                eps: cfg.eps,
+                bias: true,
+            },
+            vb.pp("o_proj"),
+        )?;
 
         Ok(BitAttention {
             span,

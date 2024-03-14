@@ -1,5 +1,5 @@
 use crate::bit_dropout::{Dropout, DropoutCfg};
-use crate::bit_linear::Bitlinear;
+use crate::bit_linear::{Bitlinear, BitlinearCfg};
 use candle_core::{Module, Tensor};
 use candle_nn::{layer_norm, seq, Activation, LayerNormConfig, Sequential, VarBuilder};
 
@@ -43,18 +43,30 @@ impl BitFeedForward {
         // Setup the GLU function
         let proj = seq()
             .add(Bitlinear::load(
-                cfg.dim,
-                inner_dim,
-                1,
-                8,
-                cfg.eps,
-                true,
+                BitlinearCfg {
+                    in_features: cfg.dim,
+                    out_features: inner_dim,
+                    num_groups: 1,
+                    b: 8,
+                    eps: cfg.eps,
+                    bias: true,
+                },
                 vb.pp("proj"),
             )?)
             .add(activation);
 
         // Linear layer
-        let linear = Bitlinear::load(inner_dim, cfg.dim, 1, 8, cfg.eps, true, vb.pp("linear"))?;
+        let linear = Bitlinear::load(
+            BitlinearCfg {
+                in_features: inner_dim,
+                out_features: cfg.dim,
+                num_groups: 1,
+                b: 8,
+                eps: cfg.eps,
+                bias: true,
+            },
+            vb.pp("linear"),
+        )?;
 
         // Return the layer as a sequential module
         Ok(Self {

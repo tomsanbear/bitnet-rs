@@ -14,19 +14,20 @@ pub struct Bitlinear {
     span: tracing::Span,
 }
 
+pub struct BitlinearCfg {
+    pub in_features: usize,
+    pub out_features: usize,
+    pub num_groups: usize,
+    pub b: i32,
+    pub eps: f32,
+    pub bias: bool,
+}
+
 impl Bitlinear {
-    pub fn load(
-        in_features: usize,
-        out_features: usize,
-        num_groups: usize,
-        b: i32,
-        eps: f32,
-        bias: bool,
-        vb: VarBuilder,
-    ) -> candle_core::Result<Self> {
+    pub fn load(cfg: BitlinearCfg, vb: VarBuilder) -> candle_core::Result<Self> {
         let span = span!(tracing::Level::TRACE, "bit-linear");
         let weight = vb.get_with_hints(
-            (out_features, in_features),
+            (cfg.out_features, cfg.in_features),
             "weight",
             Init::Randn {
                 mean: 0.0,
@@ -34,25 +35,25 @@ impl Bitlinear {
             },
         )?;
         let layer_norm = layer_norm(
-            in_features,
+            cfg.in_features,
             LayerNormConfig {
-                eps: eps.into(),
+                eps: cfg.eps.into(),
                 ..LayerNormConfig::default()
             },
             vb.pp("layer_norm"),
         )?;
-        let bias = match bias {
-            true => Some(vb.get_with_hints(out_features, "bias", Init::Const(0.0))?),
+        let bias = match cfg.bias {
+            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
             false => None,
         };
         Ok(Self {
             span,
-            num_groups,
+            num_groups: cfg.num_groups,
             weight,
             layer_norm,
-            b,
+            b: cfg.b,
             bias,
-            eps,
+            eps: cfg.eps,
         })
     }
 
@@ -161,7 +162,7 @@ impl Module for Bitlinear {
 #[cfg(test)]
 mod bitlinear_tests {
     use super::Bitlinear;
-    use crate::utils_tensor::device;
+    use crate::{bit_linear::BitlinearCfg, utils_tensor::device};
     use candle_core::{DType, Module, Result, Tensor};
     use candle_nn::var_builder::VarBuilderArgs;
 
@@ -171,7 +172,17 @@ mod bitlinear_tests {
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 64;
         let out_features = 64;
-        let bl = Bitlinear::load(in_features, out_features, 1, 8, 1e-6, true, vb)?;
+        let bl = Bitlinear::load(
+            BitlinearCfg {
+                in_features,
+                out_features,
+                num_groups: 1,
+                b: 8,
+                eps: 1e-6,
+                bias: true,
+            },
+            vb,
+        )?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (1, 64), &device.clone())?;
         let output = bl.forward(&input)?;
         assert_eq!(output.shape().dims2()?, (1, 64));
