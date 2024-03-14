@@ -187,27 +187,27 @@ mod bit_attention_tests {
     use candle_nn::VarBuilder;
 
     const DEFAULT_CFG: BitAttentionCfg = BitAttentionCfg {
-        embed_dim: 128,
+        embed_dim: 64,
         kv_heads: 8,
         query_heads: 8,
         dropout: 0.1,
-        layer_norm_enabled: false,
+        layer_norm_enabled: true,
         eps: 1e-6,
     };
 
     #[test]
-    fn it_matches_python_snapshot() -> Result<()> {
+    fn forward_produces_expected_shape() -> Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
-        let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 512, 128), &device)?;
+        let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?;
         let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
 
         let output_tensor = bit_attention
             .forward(&input_tensor, &input_tensor, &input_tensor, true)
             .unwrap();
 
-        assert_eq!(output_tensor.shape().dims(), &[2, 512, 128]);
+        assert_eq!(output_tensor.shape().dims(), &[2, 8, 64]);
 
         Ok(())
     }
