@@ -24,6 +24,9 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
     let device = device(common_args.cpu)?;
 
     let safetensors = safetensors::load("./checkpoint.safetensors", &device)?;
+    safetensors.iter().for_each(|(k, v)| {
+        println!("{}: {:?}", k, v);
+    });
     let vb = VarBuilder::from_tensors(safetensors, DType::F32, &device);
 
     let config = Config::default();

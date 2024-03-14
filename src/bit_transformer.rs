@@ -23,11 +23,12 @@ impl BitTransformer {
                 (
                     BitAttention::load(
                         BitAttentionCfg {
-                            embed_dim: cfg.dim,
-                            query_heads: cfg.heads,
-                            kv_heads: 8,
+                            dim: cfg.dim,
+                            n_heads: cfg.heads,
+                            n_kv_heads: 8,
                             dropout: 0.1,
                             layer_norm_enabled: true,
+                            bias: true,
                             eps: cfg.eps,
                         },
                         vb.pp(&format!("attn.{i}")),
@@ -68,7 +69,7 @@ impl BitTransformer {
 
         // Fold each block forward
         let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
-            let x = attn.forward(&x, &x, &x, true).unwrap();
+            let x = attn.forward(&x, true).unwrap();
             let x = x.add(&x_embed).unwrap();
             let x = ffn.forward(&x).unwrap();
             x.add(&x).unwrap()

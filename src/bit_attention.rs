@@ -1,55 +1,55 @@
 use crate::{bit_linear::Bitlinear, utils_tensor::scaled_dot_product_attention};
 use anyhow::{anyhow, Result};
-use candle_core::Tensor;
+use candle_core::{Tensor, D};
 use candle_einops::einops;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
 use tracing::span;
 
 pub struct BitAttentionCfg {
-    pub embed_dim: usize,
-    pub query_heads: usize,
-    pub kv_heads: usize,
+    pub dim: usize,
+    pub n_heads: usize,
+    pub n_kv_heads: usize,
     pub dropout: f32,
+    pub bias: bool,
     pub layer_norm_enabled: bool,
     pub eps: f32,
 }
 
 pub struct BitAttention {
-    q_proj: Bitlinear,
-    k_proj: Bitlinear,
-    v_proj: Bitlinear,
+    qkv_proj: Bitlinear,
+    o_proj: Bitlinear,
     norm: Option<candle_nn::LayerNorm>,
-    out_proj: Bitlinear,
     dropout: f32,
-    query_heads: usize,
-    kv_heads: usize,
+    dim: usize,
+    head_dim: usize,
+    n_heads: usize,
+    n_kv_heads: usize,
     span: tracing::Span,
 }
 
 impl BitAttention {
     pub fn load(cfg: BitAttentionCfg, vb: VarBuilder) -> Result<Self> {
         let span = span!(tracing::Level::TRACE, "bit-attention");
-        let kv_embed_dim = cfg.embed_dim / cfg.query_heads * cfg.kv_heads;
-        let head_dim = cfg.embed_dim / cfg.query_heads;
-        if cfg.query_heads % cfg.kv_heads != 0 {
+        let head_dim = cfg.dim / cfg.n_heads;
+        if cfg.n_heads % cfg.n_kv_heads != 0 {
             return Err(anyhow!(
                 "query_heads must be divisible by kv_heads, got: {} and {}",
-                cfg.query_heads,
-                cfg.kv_heads
+                cfg.n_heads,
+                cfg.n_kv_heads
             ));
         }
-        if (cfg.embed_dim % cfg.query_heads) != 0 {
+        if (cfg.dim % cfg.n_heads) != 0 {
             return Err(anyhow!(
-                "embed_dim must be divisible by query_heads, got: {} and {}",
-                cfg.query_heads,
-                cfg.embed_dim
+                "dim must be divisible by query_heads, got: {} and {}",
+                cfg.n_heads,
+                cfg.dim
             ));
         }
-        if (cfg.embed_dim % cfg.kv_heads) != 0 {
+        if (cfg.dim % cfg.n_heads) != 0 {
             return Err(anyhow!(
-                "embed_dim must be divisible by kv_heads, got: {} and {}",
-                cfg.kv_heads,
-                cfg.embed_dim
+                "dim must be divisible by n_kv_heads, got: {} and {}",
+                cfg.n_heads,
+                cfg.dim
             ));
         }
         if head_dim % 8 != 0 {
@@ -62,32 +62,15 @@ impl BitAttention {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
         }
 
-        let q_proj = Bitlinear::load(
-            cfg.embed_dim,
-            cfg.embed_dim,
+        let total_head_dim = (cfg.n_heads + (2 * cfg.n_kv_heads)) * head_dim;
+        let qkv_proj = Bitlinear::load(
+            cfg.dim,
+            total_head_dim,
             1,
             8,
             cfg.eps,
-            true,
-            vb.pp("q_proj"),
-        )?;
-        let k_proj = Bitlinear::load(
-            cfg.embed_dim,
-            kv_embed_dim,
-            1,
-            8,
-            cfg.eps,
-            true,
-            vb.pp("k_proj"),
-        )?;
-        let v_proj = Bitlinear::load(
-            cfg.embed_dim,
-            kv_embed_dim,
-            1,
-            8,
-            cfg.eps,
-            true,
-            vb.pp("v_proj"),
+            cfg.bias,
+            vb.pp("qkv_proj"),
         )?;
 
         let norm = match cfg.layer_norm_enabled {
@@ -96,67 +79,45 @@ impl BitAttention {
                     eps: cfg.eps.into(),
                     ..LayerNormConfig::default()
                 };
-                Some(layer_norm(kv_embed_dim, config, vb.pp("norm"))?)
+                Some(layer_norm(
+                    head_dim * cfg.n_kv_heads,
+                    config,
+                    vb.pp("layer_norm"),
+                )?)
             }
             false => None,
         };
 
-        let out_proj = Bitlinear::load(
-            kv_embed_dim,
-            cfg.embed_dim,
-            1,
-            8,
-            cfg.eps,
-            true,
-            vb.pp("out_proj"),
-        )?;
+        let o_proj = Bitlinear::load(cfg.dim, cfg.dim, 1, 8, cfg.eps, true, vb.pp("o_proj"))?;
 
         Ok(BitAttention {
             span,
-            q_proj,
-            k_proj,
-            v_proj,
+            qkv_proj,
+            o_proj,
             norm,
-            query_heads: cfg.query_heads,
-            kv_heads: cfg.kv_heads,
-            out_proj,
+            dim: cfg.dim,
+            head_dim,
+            n_heads: cfg.n_heads,
+            n_kv_heads: cfg.n_kv_heads,
             dropout: cfg.dropout,
         })
     }
 
-    pub fn forward(
-        &self,
-        query: &Tensor,
-        key: &Tensor,
-        value: &Tensor,
-        is_causal: bool,
-    ) -> Result<Tensor> {
+    pub fn forward(&self, x: &Tensor, is_causal: bool) -> Result<Tensor> {
         let _enter = self.span.enter();
 
-        // shape (b, n, d)
-        let q = self.q_proj.forward(&query)?;
-        let k = self.k_proj.forward(&key)?;
-        let v = self.v_proj.forward(&value)?;
+        let qkv = self.qkv_proj.forward(x)?;
 
-        // NOTE: original library uses einops to do this, we have to implement it ourselves
-        // need to replicate "b n (h d) -> b n h d"
-        let q = {
-            let (batch_size, num_queries, total_depth) = q.dims3()?;
-            let depth_per_head = total_depth / self.query_heads;
-            q.reshape((batch_size, num_queries, self.query_heads, depth_per_head))?
-        };
-        let k = {
-            let (batch_size, num_queries, total_depth) = k.dims3()?;
-            let depth_per_head = total_depth / self.kv_heads;
-            k.reshape((batch_size, num_queries, self.kv_heads, depth_per_head))?
-        };
-        let v = {
-            let (batch_size, num_queries, total_depth) = v.dims3()?;
-            let depth_per_head = total_depth / self.kv_heads;
-            v.reshape((batch_size, num_queries, self.kv_heads, depth_per_head))?
-        };
+        let kv_size = self.n_kv_heads * self.head_dim;
+        let q = qkv.narrow(D::Minus1, 0, self.dim)?;
+        let k = qkv.narrow(D::Minus1, self.dim, kv_size)?;
+        let v = qkv.narrow(D::Minus1, self.dim + kv_size, kv_size)?;
 
-        let scale = (*query.dims().last().unwrap() as f64).sqrt();
+        let q = einops!("b n ({self.n_heads} d) -> b n {self.n_heads} d", q);
+        let k = einops!("b n ({self.n_kv_heads} d) -> b n {self.n_kv_heads} d", k);
+        let v = einops!("b n ({self.n_kv_heads} d) -> b n {self.n_kv_heads} d", v);
+
+        let scale = (q.dims4()?.3 as f64).sqrt();
         let x = scaled_dot_product_attention(
             &q,
             &k,
@@ -171,9 +132,7 @@ impl BitAttention {
             Some(ref norm) => norm.forward(&x)?,
             None => x,
         };
-
-        let x = self.out_proj.forward(&x)?;
-
+        let x = self.o_proj.forward(&x)?;
         Ok(x)
     }
 }
@@ -184,29 +143,29 @@ mod bit_attention_tests {
         bit_attention::{BitAttention, BitAttentionCfg},
         utils_tensor::device,
     };
-    use candle_core::{Result, Tensor};
+    use candle_core::Tensor;
     use candle_nn::VarBuilder;
 
-    const DEFAULT_CFG: BitAttentionCfg = BitAttentionCfg {
-        embed_dim: 64,
-        kv_heads: 8,
-        query_heads: 8,
-        dropout: 0.1,
-        layer_norm_enabled: true,
-        eps: 1e-6,
-    };
-
     #[test]
-    fn forward_produces_expected_shape() -> Result<()> {
+    fn forward_produces_expected_shape() -> anyhow::Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
         let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?;
-        let bit_attention = BitAttention::load(DEFAULT_CFG, vb).unwrap();
+        let bit_attention = BitAttention::load(
+            BitAttentionCfg {
+                dim: 64,
+                n_heads: 8,
+                n_kv_heads: 8,
+                bias: true,
+                dropout: 0.1,
+                layer_norm_enabled: true,
+                eps: 1e-6,
+            },
+            vb,
+        )?;
 
-        let output_tensor = bit_attention
-            .forward(&input_tensor, &input_tensor, &input_tensor, true)
-            .unwrap();
+        let output_tensor = bit_attention.forward(&input_tensor, true).unwrap();
 
         assert_eq!(output_tensor.shape().dims(), &[2, 8, 64]);
 
