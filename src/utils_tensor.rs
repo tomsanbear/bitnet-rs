@@ -6,7 +6,7 @@ use tracing::{event, span, Level};
 
 // Transform the input values of the tensor to it's signs, -1, 0 or 1
 pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
-    let span = tracing::span!(tracing::Level::TRACE, "sign");
+    let span = span!(tracing::Level::TRACE, "sign");
     let _enter = span.enter();
 
     // Implemented as by dividing by the absolute value to get the sign, we add a 1 to the numerator where x = 0 such that we don't divide by zero
@@ -232,7 +232,7 @@ pub fn scaled_dot_product_attention(
 
 // Wrapper on cross entropy to add tracing
 pub fn cross_entropy(inp: &Tensor, target: &Tensor) -> candle_core::Result<Tensor> {
-    let span = tracing::span!(tracing::Level::TRACE, "cross-entropy");
+    let span = span!(tracing::Level::TRACE, "cross-entropy");
     let _enter = span.enter();
     candle_nn::loss::cross_entropy(inp, target)
 }

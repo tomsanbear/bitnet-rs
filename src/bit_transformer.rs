@@ -5,6 +5,7 @@ use crate::rms_norm::RmsNorm;
 use anyhow::Result;
 use candle_core::{Module, Tensor};
 use candle_nn::{embedding, linear, seq, Embedding, Sequential, VarBuilder};
+use tracing::span;
 
 pub struct BitTransformer {
     embedding: Embedding,
@@ -15,7 +16,7 @@ pub struct BitTransformer {
 
 impl BitTransformer {
     pub fn load(cfg: Config, vb: VarBuilder, train: bool) -> Result<Self> {
-        let span = tracing::span!(tracing::Level::TRACE, "bit-transformer");
+        let span = span!(tracing::Level::TRACE, "bit-transformer");
         let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("embedding"))?;
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {

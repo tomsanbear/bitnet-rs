@@ -24,7 +24,7 @@ impl Bitlinear {
         bias: bool,
         vb: VarBuilder,
     ) -> candle_core::Result<Self> {
-        let span = tracing::span!(tracing::Level::TRACE, "bit-linear");
+        let span = span!(tracing::Level::TRACE, "bit-linear");
         let weight = vb.get_with_hints(
             (out_features, in_features),
             "weight",
@@ -65,7 +65,7 @@ impl Bitlinear {
     }
 
     fn binarize_weights_groupwise(&self) -> candle_core::Result<Tensor> {
-        let span = tracing::span!(tracing::Level::TRACE, "binarize-weights-groupwise");
+        let span = span!(tracing::Level::TRACE, "binarize-weights-groupwise");
         let _enter = span.enter();
         let group_size = self.weight.dims()[0] / self.num_groups;
         let mut bin_weights = Vec::with_capacity(self.num_groups);

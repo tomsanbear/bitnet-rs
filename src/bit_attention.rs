@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use candle_core::Tensor;
 use candle_einops::einops;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
+use tracing::span;
 
 pub struct BitAttentionCfg {
     pub embed_dim: usize,
@@ -27,7 +28,7 @@ pub struct BitAttention {
 
 impl BitAttention {
     pub fn load(cfg: BitAttentionCfg, vb: VarBuilder) -> Result<Self> {
-        let span = tracing::span!(tracing::Level::TRACE, "bit-attention");
+        let span = span!(tracing::Level::TRACE, "bit-attention");
         let kv_embed_dim = cfg.embed_dim / cfg.query_heads * cfg.kv_heads;
         let head_dim = cfg.embed_dim / cfg.query_heads;
         if cfg.query_heads % cfg.kv_heads != 0 {

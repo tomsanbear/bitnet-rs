@@ -1,5 +1,6 @@
 use candle_core::Tensor;
 use candle_nn::Module;
+use tracing::span;
 
 pub struct DropoutCfg {
     pub p: f32,
@@ -15,7 +16,7 @@ pub struct Dropout {
 
 impl Dropout {
     pub fn load(cfg: DropoutCfg) -> anyhow::Result<Self> {
-        let span = tracing::span!(tracing::Level::TRACE, "dropout");
+        let span = span!(tracing::Level::TRACE, "dropout");
         Ok(Self {
             span,
             drop_p: cfg.p,

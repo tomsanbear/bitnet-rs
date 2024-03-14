@@ -9,6 +9,7 @@ use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use kdam::tqdm;
+use tracing::span;
 
 fn valid_loss(
     seq_len: usize,
@@ -17,7 +18,7 @@ fn valid_loss(
     model: &mut BitTransformer,
     device: &Device,
 ) -> Result<f64> {
-    let span = tracing::span!(tracing::Level::TRACE, "validate-loss");
+    let span = span!(tracing::Level::TRACE, "validate-loss");
     let _enter = span.enter();
 
     let iter = DatasetRandomIter::new(dataset, true, seq_len, device.clone());
@@ -30,7 +31,7 @@ fn valid_loss(
         total = batch_count,
         desc = "Checking loss"
     ) {
-        let span = tracing::span!(tracing::Level::TRACE, "validate-loss-iter");
+        let span = span!(tracing::Level::TRACE, "validate-loss-iter");
         let _enter = span.enter();
         let (inp, tgt) = inp_tgt?;
         let logits = model.forward(&inp)?;
@@ -42,7 +43,7 @@ fn valid_loss(
 }
 
 pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
-    let span = tracing::span!(tracing::Level::TRACE, "training");
+    let span = span!(tracing::Level::TRACE, "training");
     let _enter = span.enter();
 
     // Setup device
@@ -83,13 +84,13 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
 
     // Training loop
     for (batch_index, batch) in tqdm!(batch_iter.enumerate(), desc = "Training") {
-        let span = tracing::span!(tracing::Level::TRACE, "training-iteration");
+        let span = span!(tracing::Level::TRACE, "training-iteration");
         let _enter = span.enter();
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         {
-            let span = tracing::span!(tracing::Level::TRACE, "backward_step");
+            let span = span!(tracing::Level::TRACE, "backward_step");
             let _enter = span.enter();
             opt.backward_step(&loss)?;
         }
