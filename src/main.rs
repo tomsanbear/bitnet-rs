@@ -61,7 +61,7 @@ pub struct TrainingCmd {
     dataset: String,
 
     /// The batch size to use
-    #[arg(long, default_value = "2")]
+    #[arg(long, default_value = "1")]
     batch_size: usize,
 
     /// The learning rate to use
