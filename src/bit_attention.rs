@@ -158,15 +158,69 @@ mod bit_attention_tests {
         bit_attention::{BitAttention, BitAttentionCfg},
         utils_tensor::device,
     };
-    use candle_core::Tensor;
+    use candle_core::{DType, Tensor};
     use candle_nn::VarBuilder;
 
     #[test]
-    fn forward_produces_expected_shape() -> anyhow::Result<()> {
+    fn forward_produces_expected_shape_f32() -> anyhow::Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
         let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?;
+        let bit_attention = BitAttention::load(
+            BitAttentionCfg {
+                dim: 64,
+                n_heads: 8,
+                n_kv_heads: 8,
+                bias: true,
+                dropout: 0.1,
+                layer_norm_enabled: true,
+                eps: 1e-6,
+            },
+            vb,
+        )?;
+
+        let output_tensor = bit_attention.forward(&input_tensor, true).unwrap();
+
+        assert_eq!(output_tensor.shape().dims(), &[2, 8, 64]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn forward_produces_expected_shape_f16() -> anyhow::Result<()> {
+        let device = device(true).unwrap();
+        let vb = VarBuilder::zeros(candle_core::DType::F16, &device);
+
+        let input_tensor =
+            Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?.to_dtype(DType::F16)?;
+        let bit_attention = BitAttention::load(
+            BitAttentionCfg {
+                dim: 64,
+                n_heads: 8,
+                n_kv_heads: 8,
+                bias: true,
+                dropout: 0.1,
+                layer_norm_enabled: true,
+                eps: 1e-6,
+            },
+            vb,
+        )?;
+
+        let output_tensor = bit_attention.forward(&input_tensor, true).unwrap();
+
+        assert_eq!(output_tensor.shape().dims(), &[2, 8, 64]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn forward_produces_expected_shape_bf16() -> anyhow::Result<()> {
+        let device = device(true).unwrap();
+        let vb = VarBuilder::zeros(candle_core::DType::BF16, &device);
+
+        let input_tensor =
+            Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?.to_dtype(DType::BF16)?;
         let bit_attention = BitAttention::load(
             BitAttentionCfg {
                 dim: 64,

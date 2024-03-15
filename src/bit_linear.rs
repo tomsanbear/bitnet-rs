@@ -87,8 +87,7 @@ impl Bitlinear {
         let span = span!(tracing::Level::TRACE, "dequantize-activations");
         let _enter = span.enter();
 
-        let q_b = 2f32.powi(self.b);
-        let q_b_t = Tensor::new(q_b, x.device())?;
+        let q_b = 2f64.powi(self.b) as f64;
         let group_size = x.dims()[1] / self.num_groups;
 
         let mut grouped_results = Vec::with_capacity(self.num_groups);
@@ -98,9 +97,7 @@ impl Bitlinear {
             let start_idx = g * group_size;
             let quantized_group = x.narrow(1, start_idx, group_size)?;
             let gamma_g = quantized_group.abs()?.max_keepdim(D::Minus1)?;
-            let dequantized_x = quantized_group
-                .broadcast_mul(&gamma_g)?
-                .broadcast_div(&q_b_t)?;
+            let dequantized_x = (quantized_group.broadcast_mul(&gamma_g)? / q_b)?;
             grouped_results.push(dequantized_x);
         }
         let quantized_x = grouped_results.into_boxed_slice();
@@ -112,8 +109,7 @@ impl Bitlinear {
         let span = span!(tracing::Level::TRACE, "quantize-activations");
         let _enter = span.enter();
 
-        let q_b = 2f32.powi(self.b);
-        let q_b_t = Tensor::new(q_b, x.device())?;
+        let q_b = 2f64.powi(self.b);
         let group_size = x.dims()[1] / self.num_groups;
 
         let mut grouped_results = Vec::with_capacity(self.num_groups);
@@ -123,11 +119,9 @@ impl Bitlinear {
             let start_idx = g * group_size;
             let activation_group = x.narrow(1, start_idx, group_size)?;
             let gamma_g = activation_group.abs()?.max_keepdim(D::Minus1)?;
-            let quantized_x = activation_group.broadcast_mul(&q_b_t)?;
-            let quantized_x = quantized_x.broadcast_div(
-                &(gamma_g.broadcast_add(&Tensor::new(self.eps, quantized_x.device())?)?),
-            )?;
-            let quantized_x = quantized_x.clamp(-q_b + self.eps, q_b - self.eps)?;
+            let quantized_x = (activation_group * q_b)?;
+            let quantized_x = quantized_x.broadcast_div(&(gamma_g + self.eps as f64)?)?;
+            let quantized_x = quantized_x.clamp(-q_b + self.eps as f64, q_b - self.eps as f64)?;
             grouped_results.push(quantized_x);
         }
         let quantized_x = grouped_results.into_boxed_slice();

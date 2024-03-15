@@ -10,7 +10,9 @@ pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
     let _enter = span.enter();
 
     // Implemented as by dividing by the absolute value to get the sign, we add a 1 to the numerator where x = 0 such that we don't divide by zero
-    let zeros = x.broadcast_eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?;
+    let zeros = x
+        .broadcast_eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?
+        .to_dtype(DType::BF16)?;
     event!(Level::TRACE, "zeros: {:?}", zeros);
     let abs_x = x.abs()?.add(&zeros.to_dtype(x.dtype())?)?;
     event!(Level::TRACE, "abs_x: {:?}", abs_x);
@@ -76,7 +78,7 @@ pub fn dtype(device: &Device) -> Result<candle_core::DType> {
         Ok(candle_core::DType::F32)
     } else if device.is_metal() {
         // We use f32 for metal since f16 is not supported for many required operations
-        Ok(candle_core::DType::F32)
+        Ok(candle_core::DType::F16)
     } else if device.is_cuda() {
         // We use f16 for cuda since we don't actually need anything more than that for this model
         Ok(candle_core::DType::F32)

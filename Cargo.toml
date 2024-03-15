@@ -7,29 +7,29 @@ edition = "2021"
 
 [dependencies]
 accelerate-src = { version = "0.3.2", optional = true }
-candle-core = "0.4.0"
-candle-nn = "0.4.0"
-candle-transformers = "0.4.0"
+anyhow = "1.0.80"
+candle-core = "0.4"
+candle-datasets = "0.4"
+candle-einops = "0.1.0"
+candle-ext = "0.1.7"
+candle-flash-attn = { version = "0.4.1", optional = true }
+candle-nn = "0.4"
+candle-onnx = { version = "0.4", optional = true }
+candle-transformers = "0.4"
 clap = "4.5.1"
+cudarc = { version = "0.10.0", optional = true }
+half = "2.4.0"
 hf-hub = "0.3.2"
+intel-mkl-src = { version = "0.8.1", optional = true }
+kdam = "0.5.1"
 num_cpus = "1.16.0"
 pretty_trace = "0.5.23"
+rand = "0.8.5"
 serde = "1.0.197"
 tokenizers = "0.15.2"
 tracing = "0.1.40"
 tracing-chrome = "0.7.1"
 tracing-subscriber = "0.3.18"
-candle-flash-attn = { version = "0.4.1", optional = true }
-rand = "0.8.5"
-candle-datasets = "0.4.1"
-kdam = "0.5.1"
-half = "2.4.0"
-intel-mkl-src = {version="0.8.1", optional = true}
-cudarc = {version="0.10.0", optional = true}
-candle-onnx = {version="0.4.1", optional = true}
-anyhow = "1.0.80"
-candle-einops = "0.1.0"
-candle-ext = "0.1.7"
 
 [build-dependencies]
 bindgen_cuda = { version = "0.1.1", optional = true }
@@ -37,11 +37,27 @@ bindgen_cuda = { version = "0.1.1", optional = true }
 
 [features]
 default = []
-accelerate = ["dep:accelerate-src", "candle-core/accelerate", "candle-nn/accelerate", "candle-transformers/accelerate"]
-cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda", "dep:bindgen_cuda", "candle-ext/cuda"]
+accelerate = [
+    "dep:accelerate-src",
+    "candle-core/accelerate",
+    "candle-nn/accelerate",
+    "candle-transformers/accelerate",
+]
+cuda = [
+    "candle-core/cuda",
+    "candle-nn/cuda",
+    "candle-transformers/cuda",
+    "dep:bindgen_cuda",
+    "candle-ext/cuda",
+]
 cudnn = ["candle-core/cudnn"]
 flash-attn = ["cuda", "candle-transformers/flash-attn", "dep:candle-flash-attn"]
-mkl = ["dep:intel-mkl-src", "candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
+mkl = [
+    "dep:intel-mkl-src",
+    "candle-core/mkl",
+    "candle-nn/mkl",
+    "candle-transformers/mkl",
+]
 nccl = ["cuda", "cudarc/nccl"]
 onnx = ["candle-onnx"]
 metal = ["candle-core/metal", "candle-nn/metal"]
