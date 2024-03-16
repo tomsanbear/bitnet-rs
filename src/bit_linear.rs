@@ -1,6 +1,6 @@
 use crate::utils_tensor::sign;
 use anyhow::Ok;
-use candle_core::{Tensor, D};
+use candle_core::Tensor;
 use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Module, VarBuilder};
 use candle_transformers::models::with_tracing::Linear;
 use tracing::{event, span};
@@ -11,6 +11,7 @@ pub struct Bitlinear {
     bias: Option<Tensor>,
     layer_norm: LayerNorm,
     eps: f32,
+    eps_t: Tensor,
     q_b: f64,
     beta: Tensor,
     gamma: Tensor,
@@ -48,9 +49,9 @@ impl Bitlinear {
             false => None,
         };
         let q_b = 2f64.powi(cfg.b - 1) as f64;
-        let beta = Tensor::zeros(weight.dims()[0], weight.dtype(), weight.device())?;
-        let gamma = Tensor::zeros(weight.dims()[0], weight.dtype(), weight.device())?;
-
+        let beta = Tensor::zeros(weight.dims()[0], vb.dtype(), vb.device())?;
+        let gamma = Tensor::zeros(weight.dims()[0], vb.dtype(), vb.device())?;
+        let eps_t = Tensor::new(cfg.eps, vb.device())?;
         Ok(Self {
             num_groups: cfg.num_groups,
             weight,
@@ -60,6 +61,7 @@ impl Bitlinear {
             q_b,
             beta,
             gamma,
+            eps_t,
         })
     }
 
@@ -109,9 +111,9 @@ impl Bitlinear {
         let _enter = span.enter();
 
         let group_size = x.dims()[0] / self.num_groups;
-        let quantized_x = Tensor::zeros_like(&x)?;
+        let mut quantized_x = Tensor::zeros_like(&x)?;
 
-        let quantized_x = (0..self.num_groups).fold(quantized_x, |quantized_x: Tensor, i| {
+        for i in 0..self.num_groups {
             let start_idx = i * group_size;
             let end_idx = (i + 1) * group_size;
 
@@ -139,17 +141,13 @@ impl Bitlinear {
                 let clamp_max = self.q_b - self.eps as f64;
                 let x = (activation_group * self.q_b).unwrap();
                 let x = x
-                    .broadcast_div(
-                        &gamma_g
-                            .broadcast_add(&Tensor::new(self.eps, quantized_x.device()).unwrap())
-                            .unwrap(),
-                    )
+                    .broadcast_div(&gamma_g.broadcast_add(&self.eps_t).unwrap())
                     .unwrap();
                 let x = x.clamp(clamp_min, clamp_max).unwrap();
                 x
             };
 
-            quantized_x
+            quantized_x = quantized_x
                 .slice_assign(
                     &[
                         start_idx..end_idx,
@@ -159,7 +157,7 @@ impl Bitlinear {
                     &quantized_x_group,
                 )
                 .unwrap()
-        });
+        }
         Ok(quantized_x)
     }
 
@@ -182,6 +180,8 @@ impl Bitlinear {
 
         // dequantize activations
         let output = self.dequantize_activations(&output)?;
+
+        let output = output.contiguous()?;
 
         Ok(output)
     }

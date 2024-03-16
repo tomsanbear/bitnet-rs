@@ -95,7 +95,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
             let _enter = span.enter();
             opt.backward_step(&loss)?;
         }
-        if batch_index > 0 && batch_index % 100 == 0 {
+        if batch_index > 0 && batch_index % 10 == 0 {
             let training_loss = f64::from(loss.to_vec0::<f32>()?);
             let validation_loss =
                 valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
