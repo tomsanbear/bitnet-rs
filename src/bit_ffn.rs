@@ -2,6 +2,7 @@ use crate::bit_dropout::{Dropout, DropoutCfg};
 use crate::bit_linear::{Bitlinear, BitlinearCfg};
 use candle_core::{Module, Tensor};
 use candle_nn::{layer_norm, Activation, LayerNorm, LayerNormConfig, VarBuilder};
+use tracing::instrument;
 
 pub struct BitFeedForwardCfg {
     pub dim: usize,
@@ -11,6 +12,7 @@ pub struct BitFeedForwardCfg {
     pub eps: f32,
 }
 
+#[derive(Debug)]
 pub struct BitFeedForward {
     glu_linear: Bitlinear,
     activation: Activation,
@@ -79,6 +81,7 @@ impl BitFeedForward {
         })
     }
 
+    #[instrument]
     pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
         let x = self.glu_linear.forward(x)?;
         let x = self.activation.forward(&x)?;

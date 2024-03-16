@@ -6,8 +6,9 @@ use anyhow::{anyhow, Result};
 use candle_core::{Tensor, D};
 use candle_einops::einops;
 use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
-use tracing::span;
+use tracing::instrument;
 
+#[derive(Debug, Clone, Copy)]
 pub struct BitAttentionCfg {
     pub dim: usize,
     pub n_heads: usize,
@@ -18,6 +19,7 @@ pub struct BitAttentionCfg {
     pub eps: f32,
 }
 
+#[derive(Debug)]
 pub struct BitAttention {
     qkv_proj: Bitlinear,
     o_proj: Bitlinear,
@@ -27,12 +29,10 @@ pub struct BitAttention {
     head_dim: usize,
     n_heads: usize,
     n_kv_heads: usize,
-    span: tracing::Span,
 }
 
 impl BitAttention {
     pub fn load(cfg: BitAttentionCfg, vb: VarBuilder) -> Result<Self> {
-        let span = span!(tracing::Level::TRACE, "bit-attention");
         let head_dim = cfg.dim / cfg.n_heads;
         if cfg.n_heads % cfg.n_kv_heads != 0 {
             return Err(anyhow!(
@@ -106,7 +106,6 @@ impl BitAttention {
         )?;
 
         Ok(BitAttention {
-            span,
             qkv_proj,
             o_proj,
             norm,
@@ -118,9 +117,8 @@ impl BitAttention {
         })
     }
 
+    #[instrument]
     pub fn forward(&self, x: &Tensor, is_causal: bool) -> Result<Tensor> {
-        let _enter = self.span.enter();
-
         let qkv = self.qkv_proj.forward(x)?;
 
         let kv_size = self.n_kv_heads * self.head_dim;

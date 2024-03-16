@@ -26,6 +26,7 @@ fn valid_loss(
     let mut sum_ce = 0f64;
     let mut cnt = 0usize;
     let batch_count = 10;
+
     for inp_tgt in batch_iter.take(batch_count) {
         let span = span!(tracing::Level::TRACE, "validate-loss-iter");
         let _enter = span.enter();

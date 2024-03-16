@@ -3,8 +3,9 @@ use anyhow::Ok;
 use candle_core::{Tensor, D};
 use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Module, VarBuilder};
 use candle_transformers::models::with_tracing::Linear;
-use tracing::span;
+use tracing::instrument;
 
+#[derive(Debug, Clone, Copy)]
 pub struct BitlinearCfg {
     pub in_features: usize,
     pub out_features: usize,
@@ -14,6 +15,7 @@ pub struct BitlinearCfg {
     pub bias: bool,
 }
 
+#[derive(Debug)]
 pub struct Bitlinear {
     num_groups: usize,
     weight: Tensor,
@@ -34,6 +36,10 @@ impl Bitlinear {
                 stdev: 1.0,
             },
         )?;
+        let bias = match cfg.bias {
+            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
+            false => None,
+        };
         let layer_norm = layer_norm(
             cfg.in_features,
             LayerNormConfig {
@@ -42,10 +48,6 @@ impl Bitlinear {
             },
             vb.pp("layer_norm"),
         )?;
-        let bias = match cfg.bias {
-            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
-            false => None,
-        };
         let q_b = 2f64.powi(cfg.b - 1);
         let eps_t = Tensor::new(cfg.eps, vb.device())?.to_dtype(vb.dtype())?;
         Ok(Self {
@@ -59,13 +61,13 @@ impl Bitlinear {
         })
     }
 
+    #[instrument]
     fn ste(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "ste");
-        let _enter = span.enter();
         let binarized_x = sign(x)?;
         (binarized_x - x)?.detach() + x
     }
 
+    #[instrument]
     fn binarize_weights_groupwise(&self) -> anyhow::Result<(Tensor, Tensor)> {
         /*
          * Note:
@@ -91,35 +93,26 @@ impl Bitlinear {
         Ok((binarized_weights, beta))
     }
 
+    #[instrument]
     fn dequantize_activations(
         &self,
         x: &Tensor,
         beta: &Tensor,
         gamma: &Tensor,
     ) -> anyhow::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "dequantize-activations");
-        let _enter = span.enter();
         let x = (x.broadcast_mul(gamma)?.broadcast_mul(beta)? / self.q_b)?;
         Ok(x)
     }
 
+    #[instrument]
     fn quantize_activations(&self, x: &Tensor) -> anyhow::Result<(Tensor, Tensor)> {
-        let span = span!(tracing::Level::TRACE, "quantize-activations");
-        let _enter = span.enter();
-
         let mut quantized_x_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
         let mut gamma_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
         let group_size = x.dims()[0] / self.num_groups;
         for i in 0..self.num_groups {
             let start_idx = i * group_size;
             let activation_group = x.narrow(0, start_idx, group_size).unwrap();
-            let gamma = activation_group
-                .abs()
-                .unwrap()
-                .flatten_all()
-                .unwrap()
-                .max(0)
-                .unwrap();
+            let gamma = activation_group.abs()?.max(D::Minus1)?.max(D::Minus1)?;
             let gamma = gamma.expand(&[group_size]).unwrap();
             let clamp_min = -self.q_b + self.eps as f64;
             let clamp_max = self.q_b - self.eps as f64;
@@ -136,10 +129,8 @@ impl Bitlinear {
         Ok((quantized_x, gamma))
     }
 
+    #[instrument]
     pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "bit-linear");
-        let _enter = span.enter();
-
         // normalize input
         let x = self.layer_norm.forward(x)?;
 

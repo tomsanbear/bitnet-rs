@@ -4,19 +4,20 @@ use crate::config::Config;
 use crate::rms_norm::RmsNorm;
 use anyhow::Result;
 use candle_core::{Module, Tensor};
-use candle_nn::{embedding, linear, seq, Embedding, Sequential, VarBuilder};
-use tracing::span;
+use candle_nn::{embedding, Embedding, VarBuilder};
+use candle_transformers::models::with_tracing::{linear, Linear};
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct BitTransformer {
     embedding: Embedding,
     blocks: Vec<(BitAttention, BitFeedForward)>,
-    to_logits: Sequential,
-    span: tracing::Span,
+    rms_norm: RmsNorm,
+    logits_linear: Linear,
 }
 
 impl BitTransformer {
     pub fn load(cfg: Config, vb: VarBuilder, train: bool) -> Result<Self> {
-        let span = span!(tracing::Level::TRACE, "bit-transformer");
         let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("embedding"))?;
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {
@@ -49,21 +50,19 @@ impl BitTransformer {
             })
             .collect();
 
-        let to_logits = seq()
-            .add(RmsNorm::load(cfg.eps, cfg.dim, vb.pp("rms_norm"))?)
-            .add(linear(cfg.dim, cfg.vocab_size, vb.pp("logits_linear"))?);
+        let rms_norm = RmsNorm::load(cfg.eps, cfg.dim, vb.pp("rms_norm"))?;
+        let logits_linear = linear(cfg.dim, cfg.vocab_size, vb.pp("logits_linear"))?;
 
         Ok(Self {
-            span,
             blocks,
-            to_logits,
+            rms_norm,
+            logits_linear,
             embedding,
         })
     }
 
+    #[instrument]
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let _enter = self.span.enter();
-
         // Run the embedding layer
         let x_embed = self.embedding.forward(x)?;
 
@@ -76,7 +75,8 @@ impl BitTransformer {
         });
 
         // Convert to logits
-        let x = self.to_logits.forward(&x)?;
+        let x = self.rms_norm.forward(&x)?;
+        let x = self.logits_linear.forward(&x)?;
 
         // Return the logits
         Ok(x)

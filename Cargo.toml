@@ -11,11 +11,8 @@ anyhow = "1.0.80"
 candle-core = "0.4"
 candle-datasets = "0.4"
 candle-einops = "0.1.0"
-candle-ext = "0.1.7"
 candle-flash-attn = { version = "0.4.1", optional = true }
 candle-nn = "0.4"
-candle-onnx = { version = "0.4", optional = true }
-candle-optimisers = { git = "https://github.com/KGrewal1/optimisers.git", version = "0.4.0" }
 candle-transformers = "0.4"
 clap = "4.5.1"
 crossterm = "0.27.0"
@@ -51,7 +48,6 @@ cuda = [
     "candle-nn/cuda",
     "candle-transformers/cuda",
     "dep:bindgen_cuda",
-    "candle-ext/cuda",
 ]
 cudnn = ["candle-core/cudnn"]
 flash-attn = ["cuda", "candle-transformers/flash-attn", "dep:candle-flash-attn"]
@@ -62,5 +58,4 @@ mkl = [
     "candle-transformers/mkl",
 ]
 nccl = ["cuda", "cudarc/nccl"]
-onnx = ["candle-onnx"]
 metal = ["candle-core/metal", "candle-nn/metal"]

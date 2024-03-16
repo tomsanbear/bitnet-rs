@@ -1,7 +1,8 @@
 use candle_core::{Tensor, Var};
 use candle_nn::{AdamW, Optimizer};
-use tracing::span;
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct BitnetOptimizer {
     inner: AdamW,
 }
@@ -14,9 +15,8 @@ impl BitnetOptimizer {
         Ok(Self { inner })
     }
 
+    #[instrument]
     pub fn backward_step(&mut self, loss: &Tensor) -> anyhow::Result<()> {
-        let span = span!(tracing::Level::TRACE, "backward-step");
-        let _enter = span.enter();
         Ok(self.inner.backward_step(loss)?)
     }
 }
