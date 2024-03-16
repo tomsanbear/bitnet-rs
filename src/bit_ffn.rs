@@ -1,7 +1,7 @@
 use crate::bit_dropout::{Dropout, DropoutCfg};
 use crate::bit_linear::{Bitlinear, BitlinearCfg};
 use candle_core::{Module, Tensor};
-use candle_nn::{layer_norm, seq, Activation, LayerNormConfig, Sequential, VarBuilder};
+use candle_nn::{layer_norm, Activation, LayerNorm, LayerNormConfig, VarBuilder};
 
 pub struct BitFeedForwardCfg {
     pub dim: usize,
@@ -12,7 +12,11 @@ pub struct BitFeedForwardCfg {
 }
 
 pub struct BitFeedForward {
-    layer: Sequential,
+    glu_linear: Bitlinear,
+    activation: Activation,
+    norm: LayerNorm,
+    dropout: Dropout,
+    linear: Bitlinear,
 }
 
 impl BitFeedForward {
@@ -40,20 +44,17 @@ impl BitFeedForward {
             vb.pp("norm"),
         )?;
 
-        // Setup the GLU function
-        let proj = seq()
-            .add(Bitlinear::load(
-                BitlinearCfg {
-                    in_features: cfg.dim,
-                    out_features: inner_dim,
-                    num_groups: 1,
-                    b: 8,
-                    eps: cfg.eps,
-                    bias: true,
-                },
-                vb.pp("proj"),
-            )?)
-            .add(activation);
+        let glu_linear = Bitlinear::load(
+            BitlinearCfg {
+                in_features: cfg.dim,
+                out_features: inner_dim,
+                num_groups: 1,
+                b: 8,
+                eps: cfg.eps,
+                bias: true,
+            },
+            vb.pp("proj"),
+        )?;
 
         // Linear layer
         let linear = Bitlinear::load(
@@ -70,14 +71,21 @@ impl BitFeedForward {
 
         // Return the layer as a sequential module
         Ok(Self {
-            layer: seq().add(proj).add(norm).add(dropout).add(linear),
+            glu_linear,
+            activation,
+            norm,
+            dropout,
+            linear,
         })
     }
-}
 
-impl Module for BitFeedForward {
-    fn forward(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        self.layer.forward(x)
+    pub fn forward(&mut self, x: &Tensor) -> anyhow::Result<Tensor> {
+        let x = self.glu_linear.forward(&x)?;
+        let x = self.activation.forward(&x)?;
+        let x = self.norm.forward(&x)?;
+        let x = self.dropout.forward(&x)?;
+        let x = self.linear.forward(&x)?;
+        Ok(x)
     }
 }
 
@@ -85,7 +93,7 @@ impl Module for BitFeedForward {
 mod bitffn_tests {
     use super::BitFeedForward;
     use crate::{bit_ffn::BitFeedForwardCfg, utils_tensor::device};
-    use candle_core::{DType, Device, Module, Tensor};
+    use candle_core::{DType, Device, Tensor};
     use candle_nn::VarBuilder;
 
     #[test]
@@ -94,7 +102,7 @@ mod bitffn_tests {
         let vb = VarBuilder::zeros(DType::F32, &device);
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
-        let bff = BitFeedForward::load(
+        let mut bff = BitFeedForward::load(
             BitFeedForwardCfg {
                 dim,
                 ff_mult: 4,

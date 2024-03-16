@@ -68,12 +68,15 @@ impl BitTransformer {
         let x_embed = self.embedding.forward(x)?;
 
         // Fold each block forward
-        let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
-            let x = attn.forward(&x, true).unwrap();
-            let x = x.add(&x_embed).unwrap();
-            let x = ffn.forward(&x).unwrap();
-            x.add(&x).unwrap()
-        });
+        let x = self
+            .blocks
+            .iter_mut()
+            .fold(x_embed.clone(), |x, (attn, ffn)| {
+                let x = attn.forward(&x, true).unwrap();
+                let x = x.add(&x_embed).unwrap();
+                let x = ffn.forward(&x).unwrap();
+                x.add(&x).unwrap()
+            });
 
         // Convert to logits
         let x = self.to_logits.forward(&x)?;

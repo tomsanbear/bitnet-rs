@@ -74,13 +74,10 @@ pub fn device(cpu: bool) -> Result<Device> {
 // For a given device, return the dtype for the requested dtype
 pub fn dtype(device: &Device) -> Result<candle_core::DType> {
     if device.is_cpu() {
-        // We use f32 for cpu since f16 is not supported for many required operations
         Ok(candle_core::DType::F32)
     } else if device.is_metal() {
-        // We use f32 for metal since f16 is not supported for many required operations
-        Ok(candle_core::DType::F16)
+        Ok(candle_core::DType::F32)
     } else if device.is_cuda() {
-        // We use f16 for cuda since we don't actually need anything more than that for this model
         Ok(candle_core::DType::F32)
     } else {
         return Err(anyhow!("Unsupported device"));
