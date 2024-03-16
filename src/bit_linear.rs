@@ -181,8 +181,6 @@ impl Bitlinear {
         // dequantize activations
         let output = self.dequantize_activations(&output)?;
 
-        let output = output.contiguous()?;
-
         Ok(output)
     }
 }
