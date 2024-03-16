@@ -79,8 +79,8 @@ impl BitFeedForward {
         })
     }
 
-    pub fn forward(&mut self, x: &Tensor) -> anyhow::Result<Tensor> {
-        let x = self.glu_linear.forward(&x)?;
+    pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
+        let x = self.glu_linear.forward(x)?;
         let x = self.activation.forward(&x)?;
         let x = self.norm.forward(&x)?;
         let x = self.dropout.forward(&x)?;
@@ -102,7 +102,7 @@ mod bitffn_tests {
         let vb = VarBuilder::zeros(DType::F32, &device);
         let dim = 128;
         let input: Tensor = Tensor::randn(0f32, 1.0, (10, dim), &device)?;
-        let mut bff = BitFeedForward::load(
+        let bff = BitFeedForward::load(
             BitFeedForwardCfg {
                 dim,
                 ff_mult: 4,

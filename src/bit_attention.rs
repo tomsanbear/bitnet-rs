@@ -118,7 +118,7 @@ impl BitAttention {
         })
     }
 
-    pub fn forward(&mut self, x: &Tensor, is_causal: bool) -> Result<Tensor> {
+    pub fn forward(&self, x: &Tensor, is_causal: bool) -> Result<Tensor> {
         let _enter = self.span.enter();
 
         let qkv = self.qkv_proj.forward(x)?;
@@ -167,7 +167,7 @@ mod bit_attention_tests {
         let vb = VarBuilder::zeros(candle_core::DType::F32, &device);
 
         let input_tensor = Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?;
-        let mut bit_attention = BitAttention::load(
+        let bit_attention = BitAttention::load(
             BitAttentionCfg {
                 dim: 64,
                 n_heads: 8,
@@ -194,7 +194,7 @@ mod bit_attention_tests {
 
         let input_tensor =
             Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?.to_dtype(DType::F16)?;
-        let mut bit_attention = BitAttention::load(
+        let bit_attention = BitAttention::load(
             BitAttentionCfg {
                 dim: 64,
                 n_heads: 8,
@@ -221,7 +221,7 @@ mod bit_attention_tests {
 
         let input_tensor =
             Tensor::randn(0.0f32, 1.0f32, (2, 8, 64), &device)?.to_dtype(DType::BF16)?;
-        let mut bit_attention = BitAttention::load(
+        let bit_attention = BitAttention::load(
             BitAttentionCfg {
                 dim: 64,
                 n_heads: 8,

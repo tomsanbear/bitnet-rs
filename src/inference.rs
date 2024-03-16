@@ -27,7 +27,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
     let vb = VarBuilder::from_tensors(safetensors, DType::F32, &device);
 
     let config = Config::default();
-    let mut model = BitTransformer::load(config, vb, false)?;
+    let model = BitTransformer::load(config, vb, false)?;
 
     println!("starting the inference loop");
     let mut logits_processor = LogitsProcessor::new(rng.gen(), args.temperature, Some(args.top_p));

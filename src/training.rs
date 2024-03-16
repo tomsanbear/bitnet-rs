@@ -1,13 +1,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::Config;
-use crate::utils_tensor::{cross_entropy, dtype};
+use crate::optimizer::BitnetOptimizer;
+use crate::utils_tensor::cross_entropy;
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
 use candle_core::Device;
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
-use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
+use candle_nn::{VarBuilder, VarMap};
 use kdam::tqdm;
 use tracing::span;
 
@@ -50,7 +51,12 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let device = device(common_args.cpu)?;
 
     // Get the underlying data type to use for the model
-    let dtype = dtype(&device)?;
+    let dtype = match args.dtype.as_str() {
+        "f32" => candle_core::DType::F32,
+        "f16" => candle_core::DType::F16,
+        "bf16" => candle_core::DType::BF16,
+        _ => panic!("Invalid dtype"),
+    };
 
     // Setup varbuilder
     let mut varmap = VarMap::new();
@@ -72,23 +78,19 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
-    let mut opt = AdamW::new(
-        varmap.all_vars(),
-        ParamsAdamW {
-            lr: args.learning_rate,
-            ..Default::default()
-        },
-    )?;
+    let mut opt = BitnetOptimizer::load(varmap.all_vars(), args.learning_rate)?;
     let iter = DatasetRandomIter::new(&dataset, false, args.seq_len, device.clone());
     let batch_iter = candle_datasets::Batcher::new_r2(iter).batch_size(args.batch_size);
 
     // Training loop
-    for (batch_index, batch) in tqdm!(batch_iter.enumerate(), desc = "Training") {
+    for (batch_index, batch) in batch_iter.enumerate() {
         let span = span!(tracing::Level::TRACE, "training-iteration");
         let _enter = span.enter();
+
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
+        println!("loss={loss}");
         {
             let span = span!(tracing::Level::TRACE, "backward_step");
             let _enter = span.enter();

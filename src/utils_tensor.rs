@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use candle_core::utils::{cuda_is_available, metal_is_available};
 use candle_core::{DType, Device, Shape, Tensor, WithDType, D};
 use candle_nn::ops::{self};
@@ -68,19 +68,6 @@ pub fn device(cpu: bool) -> Result<Device> {
             println!("Running on CPU, to run on GPU, build this example with `--features cuda`");
         }
         Ok(Device::Cpu)
-    }
-}
-
-// For a given device, return the dtype for the requested dtype
-pub fn dtype(device: &Device) -> Result<candle_core::DType> {
-    if device.is_cpu() {
-        Ok(candle_core::DType::F32)
-    } else if device.is_metal() {
-        Ok(candle_core::DType::F32)
-    } else if device.is_cuda() {
-        Ok(candle_core::DType::F32)
-    } else {
-        return Err(anyhow!("Unsupported device"));
     }
 }
 

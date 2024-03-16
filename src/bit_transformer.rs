@@ -61,22 +61,19 @@ impl BitTransformer {
         })
     }
 
-    pub fn forward(&mut self, x: &Tensor) -> Result<Tensor> {
+    pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let _enter = self.span.enter();
 
         // Run the embedding layer
         let x_embed = self.embedding.forward(x)?;
 
         // Fold each block forward
-        let x = self
-            .blocks
-            .iter_mut()
-            .fold(x_embed.clone(), |x, (attn, ffn)| {
-                let x = attn.forward(&x, true).unwrap();
-                let x = x.add(&x_embed).unwrap();
-                let x = ffn.forward(&x).unwrap();
-                x.add(&x).unwrap()
-            });
+        let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
+            let x = attn.forward(&x, true).unwrap();
+            let x = x.add(&x_embed).unwrap();
+            let x = ffn.forward(&x).unwrap();
+            x.add(&x).unwrap()
+        });
 
         // Convert to logits
         let x = self.to_logits.forward(&x)?;
@@ -99,7 +96,7 @@ mod bitnet_transformer_tests {
     fn it_applies_forward_pass() -> Result<()> {
         let device = &device(true)?;
         let vb = VarBuilder::zeros(DType::F32, device);
-        let mut t = BitTransformer::load(
+        let t = BitTransformer::load(
             Config {
                 dim: 8 * 8,
                 depth: 8,
