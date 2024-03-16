@@ -7,8 +7,7 @@ use anyhow::Result;
 use candle_core::Device;
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
-use candle_nn::{Optimizer, VarBuilder, VarMap};
-use candle_optimisers::adam::{Adam, ParamsAdam};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use kdam::tqdm;
 use tracing::span;
 
@@ -73,9 +72,9 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
-    let mut opt = Adam::new(
+    let mut opt = AdamW::new(
         varmap.all_vars(),
-        ParamsAdam {
+        ParamsAdamW {
             lr: args.learning_rate,
             ..Default::default()
         },

@@ -18,7 +18,7 @@ impl Config {
             depth: 12,
             vocab_size: 32000,
             heads: 8,
-            ff_mult: 10,
+            ff_mult: 4,
             eps: 1e-6,
             ff_dropout: 0.1,
             seq_len: 100,
