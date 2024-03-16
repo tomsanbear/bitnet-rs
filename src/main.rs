@@ -66,11 +66,11 @@ pub struct TrainingCmd {
     batch_size: usize,
 
     /// The learning rate to use
-    #[arg(long, default_value = "4e-4")]
+    #[arg(long, default_value = "8e-4")]
     learning_rate: f64,
 
     /// The sequence length to use
-    #[arg(long, default_value = "512")]
+    #[arg(long, default_value = "100")]
     seq_len: usize,
 
     /// The number of tokens in the vocabulary
