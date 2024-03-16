@@ -66,7 +66,7 @@ pub struct TrainingCmd {
     batch_size: usize,
 
     /// The learning rate to use
-    #[arg(long, default_value = "8e-4")]
+    #[arg(long, default_value = "4e-4")]
     learning_rate: f64,
 
     /// The sequence length to use
@@ -80,6 +80,14 @@ pub struct TrainingCmd {
     /// The checkpoint file to continue from
     #[arg(long)]
     checkpoint: Option<String>,
+
+    /// The number of epochs to train for
+    #[arg(long, default_value = "1")]
+    epochs: usize,
+
+    /// Max number of steps
+    #[arg(long, default_value = "100000")]
+    max_steps: usize,
 }
 
 #[derive(Subcommand, Debug, Clone)]
