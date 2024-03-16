@@ -1,24 +1,22 @@
 use candle_core::{Module, Result, Tensor};
 use candle_nn::VarBuilder;
-use tracing::span;
+use tracing::instrument;
 
 #[derive(Debug, Clone)]
 pub struct RmsNorm {
     inner: candle_nn::RmsNorm,
-    span: tracing::Span,
 }
 
 impl RmsNorm {
     pub fn load(rms_norm_eps: f32, size: usize, vb: VarBuilder) -> Result<Self> {
-        let span = span!(tracing::Level::TRACE, "rms-norm");
         let inner = candle_nn::rms_norm(size, rms_norm_eps.into(), vb)?;
-        Ok(Self { inner, span })
+        Ok(Self { inner })
     }
 }
 
 impl Module for RmsNorm {
+    #[instrument]
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let _enter = self.span.enter();
         self.inner.forward(x)
     }
 }

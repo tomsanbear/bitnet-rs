@@ -5,6 +5,7 @@ mod bit_linear;
 mod bit_transformer;
 mod config;
 mod inference;
+mod optimizer;
 mod rms_norm;
 mod training;
 mod utils_tensor;
@@ -49,8 +50,8 @@ struct InferenceCmd {
 #[derive(Parser, Debug, Clone)]
 pub struct TrainingCmd {
     /// The data type for the weights, due to the implementation, we should theoretically be able to use a single bit, but we need candle to support this or contribute this
-    /// For now, this can only be: u8, u32, bf16, f16, f32, f64
-    #[arg(long, default_value = "f16")]
+    /// For now, this can only be: f32
+    #[arg(long, default_value = "f32")]
     dtype: String,
 
     /// The path to the dataset.
@@ -69,7 +70,7 @@ pub struct TrainingCmd {
     learning_rate: f64,
 
     /// The sequence length to use
-    #[arg(long, default_value = "512")]
+    #[arg(long, default_value = "100")]
     seq_len: usize,
 
     /// The number of tokens in the vocabulary
@@ -79,6 +80,14 @@ pub struct TrainingCmd {
     /// The checkpoint file to continue from
     #[arg(long)]
     checkpoint: Option<String>,
+
+    /// The number of epochs to train for
+    #[arg(long, default_value = "1")]
+    epochs: usize,
+
+    /// Max number of steps
+    #[arg(long, default_value = "100000")]
+    max_steps: usize,
 }
 
 #[derive(Subcommand, Debug, Clone)]

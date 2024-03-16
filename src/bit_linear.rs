@@ -1,19 +1,11 @@
 use crate::utils_tensor::sign;
+use anyhow::Ok;
 use candle_core::{Tensor, D};
 use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Module, VarBuilder};
 use candle_transformers::models::with_tracing::Linear;
-use tracing::{event, span};
+use tracing::instrument;
 
-pub struct Bitlinear {
-    num_groups: usize,
-    weight: Tensor,
-    bias: Option<Tensor>,
-    layer_norm: LayerNorm,
-    b: i32,
-    eps: f32,
-    span: tracing::Span,
-}
-
+#[derive(Debug, Clone, Copy)]
 pub struct BitlinearCfg {
     pub in_features: usize,
     pub out_features: usize,
@@ -23,9 +15,19 @@ pub struct BitlinearCfg {
     pub bias: bool,
 }
 
+#[derive(Debug)]
+pub struct Bitlinear {
+    num_groups: usize,
+    weight: Tensor,
+    bias: Option<Tensor>,
+    layer_norm: LayerNorm,
+    eps: f32,
+    eps_t: Tensor,
+    q_b: f64,
+}
+
 impl Bitlinear {
-    pub fn load(cfg: BitlinearCfg, vb: VarBuilder) -> candle_core::Result<Self> {
-        let span = span!(tracing::Level::TRACE, "bit-linear");
+    pub fn load(cfg: BitlinearCfg, vb: VarBuilder) -> anyhow::Result<Self> {
         let weight = vb.get_with_hints(
             (cfg.out_features, cfg.in_features),
             "weight",
@@ -34,6 +36,10 @@ impl Bitlinear {
                 stdev: 1.0,
             },
         )?;
+        let bias = match cfg.bias {
+            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
+            false => None,
+        };
         let layer_norm = layer_norm(
             cfg.in_features,
             LayerNormConfig {
@@ -42,112 +48,108 @@ impl Bitlinear {
             },
             vb.pp("layer_norm"),
         )?;
-        let bias = match cfg.bias {
-            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
-            false => None,
-        };
+        let q_b = 2f64.powi(cfg.b - 1);
+        let eps_t = Tensor::new(cfg.eps, vb.device())?.to_dtype(vb.dtype())?;
         Ok(Self {
-            span,
             num_groups: cfg.num_groups,
             weight,
             layer_norm,
-            b: cfg.b,
             bias,
             eps: cfg.eps,
+            q_b,
+            eps_t,
         })
     }
 
+    #[instrument]
     fn ste(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "ste");
-        let _enter = span.enter();
         let binarized_x = sign(x)?;
-        let binarized_x = binarized_x.sub(x)?.detach().add(x)?;
-        Ok(binarized_x)
+        (binarized_x - x)?.detach() + x
     }
 
-    fn binarize_weights_groupwise(&self) -> candle_core::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "binarize-weights-groupwise");
-        let _enter = span.enter();
+    #[instrument]
+    fn binarize_weights_groupwise(&self) -> anyhow::Result<(Tensor, Tensor)> {
+        /*
+         * Note:
+         * The original code uses slice assignment on a zeroed tensor to create the final tensor
+         * We instead push the chunks into a vector then combine at the very end to avoid the need to call
+         * slice_assign.
+         */
+        let mut binarized_weight_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
+        let mut beta_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
         let group_size = self.weight.dims()[0] / self.num_groups;
-        let mut bin_weights = Vec::with_capacity(self.num_groups);
         for i in 0..self.num_groups {
-            event!(tracing::Level::TRACE, "binarize-weights-groupwise-iter");
-            let d0_start_idx = i * group_size;
-            let weight_group = self.weight.narrow(0, d0_start_idx, group_size)?;
-            let alpha_g = weight_group.mean_all()?;
-            let ste_result = self.ste(&weight_group.broadcast_sub(&alpha_g)?)?;
-            bin_weights.push(ste_result);
+            let start_idx = i * group_size;
+            let weights_group = self.weight.narrow(0, start_idx, group_size)?;
+            let alpha_g = weights_group.mean_all()?;
+            let beta = weights_group.abs()?.mean_all()?;
+            beta_groups.push(beta);
+            let binarized_weights = self.ste(&(weights_group.broadcast_sub(&alpha_g)?))?;
+            binarized_weight_groups.push(binarized_weights);
         }
-        let bin_weights = bin_weights.into_boxed_slice();
-        let output = Tensor::cat(&bin_weights, 1).unwrap();
-        Ok(output)
+
+        let binarized_weights = Tensor::cat(&binarized_weight_groups, D::Minus1)?;
+        let beta = Tensor::cat(&beta_groups, D::Minus1)?;
+        Ok((binarized_weights, beta))
     }
 
-    fn dequantize_activations(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "dequantize-activations");
-        let _enter = span.enter();
-
-        let q_b = 2f64.powi(self.b) as f64;
-        let group_size = x.dims()[1] / self.num_groups;
-
-        let mut grouped_results = Vec::with_capacity(self.num_groups);
-        for g in 0..self.num_groups {
-            event!(tracing::Level::TRACE, "dequantize-activations-iter");
-
-            let start_idx = g * group_size;
-            let quantized_group = x.narrow(1, start_idx, group_size)?;
-            let gamma_g = quantized_group.abs()?.max_keepdim(D::Minus1)?;
-            let dequantized_x = (quantized_group.broadcast_mul(&gamma_g)? / q_b)?;
-            grouped_results.push(dequantized_x);
-        }
-        let quantized_x = grouped_results.into_boxed_slice();
-        let output = Tensor::cat(&quantized_x, 1).unwrap();
-        Ok(output)
+    #[instrument]
+    fn dequantize_activations(
+        &self,
+        x: &Tensor,
+        beta: &Tensor,
+        gamma: &Tensor,
+    ) -> anyhow::Result<Tensor> {
+        let x = (x.broadcast_mul(gamma)?.broadcast_mul(beta)? / self.q_b)?;
+        Ok(x)
     }
 
-    fn quantize_activations(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let span = span!(tracing::Level::TRACE, "quantize-activations");
-        let _enter = span.enter();
-
-        let q_b = 2f64.powi(self.b);
-        let group_size = x.dims()[1] / self.num_groups;
-
-        let mut grouped_results = Vec::with_capacity(self.num_groups);
-        for g in 0..self.num_groups {
-            event!(tracing::Level::TRACE, "binarize-weights-groupwise-iter");
-
-            let start_idx = g * group_size;
-            let activation_group = x.narrow(1, start_idx, group_size)?;
-            let gamma_g = activation_group.abs()?.max_keepdim(D::Minus1)?;
-            let quantized_x = (activation_group * q_b)?;
-            let quantized_x = quantized_x.broadcast_div(&(gamma_g + self.eps as f64)?)?;
-            let quantized_x = quantized_x.clamp(-q_b + self.eps as f64, q_b - self.eps as f64)?;
-            grouped_results.push(quantized_x);
+    #[instrument]
+    fn quantize_activations(&self, x: &Tensor) -> anyhow::Result<(Tensor, Tensor)> {
+        let mut quantized_x_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
+        let mut gamma_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
+        let group_size = x.dims()[0] / self.num_groups;
+        for i in 0..self.num_groups {
+            let start_idx = i * group_size;
+            let activation_group = x.narrow(0, start_idx, group_size).unwrap();
+            let gamma = activation_group.abs()?.max(D::Minus1)?.max(D::Minus1)?;
+            let gamma = gamma.expand(&[group_size]).unwrap();
+            let clamp_min = -self.q_b + self.eps as f64;
+            let clamp_max = self.q_b - self.eps as f64;
+            let x = (activation_group * self.q_b).unwrap();
+            let x = x
+                .broadcast_div(&gamma.broadcast_add(&self.eps_t).unwrap())
+                .unwrap();
+            let quantized_x = x.clamp(clamp_min, clamp_max).unwrap();
+            quantized_x_groups.push(quantized_x);
+            gamma_groups.push(gamma.clone());
         }
-        let quantized_x = grouped_results.into_boxed_slice();
-        let output = Tensor::cat(&quantized_x, 1).unwrap();
-        Ok(output)
+        let quantized_x = Tensor::cat(&quantized_x_groups, 0)?;
+        let gamma = Tensor::cat(&gamma_groups, 0)?;
+        Ok((quantized_x, gamma))
     }
-}
 
-impl Module for Bitlinear {
-    fn forward(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let _enter = self.span.enter();
-
+    #[instrument]
+    pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
         // normalize input
         let x = self.layer_norm.forward(x)?;
 
         // binarize weights and quantize activations
-        let binarized_weights = self.binarize_weights_groupwise()?;
-
-        // perform linear transformation
-        let output = Linear::from_weights(binarized_weights, self.bias.clone()).forward(&x)?;
+        let (binarized_weights, beta) = self.binarize_weights_groupwise()?;
 
         // quantize activations
-        let output = self.quantize_activations(&output)?;
+        let (x_quantized, gamma) = self.quantize_activations(&x)?;
+
+        // perform linear transformation
+        let output = match &self.bias {
+            Some(bias) => {
+                Linear::from_weights(binarized_weights, Some(bias.clone())).forward(&x_quantized)?
+            }
+            None => Linear::from_weights(binarized_weights, None).forward(&x_quantized)?,
+        };
 
         // dequantize activations
-        let output = self.dequantize_activations(&output)?;
+        let output = self.dequantize_activations(&output, &beta, &gamma)?;
 
         Ok(output)
     }
@@ -157,11 +159,11 @@ impl Module for Bitlinear {
 mod bitlinear_tests {
     use super::Bitlinear;
     use crate::{bit_linear::BitlinearCfg, utils_tensor::device};
-    use candle_core::{DType, Module, Result, Tensor};
+    use candle_core::{DType, Tensor};
     use candle_nn::var_builder::VarBuilderArgs;
 
     #[test]
-    fn it_applies_forward_pass() -> Result<()> {
+    fn it_applies_forward_pass() -> anyhow::Result<()> {
         let device = device(true).unwrap();
         let vb = VarBuilderArgs::zeros(DType::F32, &device.clone());
         let in_features = 64;
@@ -179,7 +181,7 @@ mod bitlinear_tests {
         )?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (1, 64), &device.clone())?;
         let output = bl.forward(&input)?;
-        assert_eq!(output.shape().dims2()?, (1, 64));
+        assert_eq!(output.shape().dims2()?, (64, 64));
         Ok(())
     }
 }

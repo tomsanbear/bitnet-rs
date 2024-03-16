@@ -1,8 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use candle_core::utils::{cuda_is_available, metal_is_available};
 use candle_core::{DType, Device, Shape, Tensor, WithDType, D};
 use candle_nn::ops::{self};
-use tracing::{event, span, Level};
+use tracing::{instrument, span};
 
 // Transform the input values of the tensor to it's signs, -1, 0 or 1
 pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
@@ -11,13 +11,10 @@ pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
 
     // Implemented as by dividing by the absolute value to get the sign, we add a 1 to the numerator where x = 0 such that we don't divide by zero
     let zeros = x
-        .broadcast_eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?
-        .to_dtype(DType::BF16)?;
-    event!(Level::TRACE, "zeros: {:?}", zeros);
+        .eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?
+        .to_dtype(x.dtype())?;
     let abs_x = x.abs()?.add(&zeros.to_dtype(x.dtype())?)?;
-    event!(Level::TRACE, "abs_x: {:?}", abs_x);
     let sign_x = (x / abs_x)?;
-    event!(Level::TRACE, "sign_x: {:?}", sign_x);
     Ok(sign_x)
 }
 
@@ -71,61 +68,40 @@ pub fn device(cpu: bool) -> Result<Device> {
     }
 }
 
-// For a given device, return the dtype for the requested dtype
-pub fn dtype(device: &Device) -> Result<candle_core::DType> {
-    if device.is_cpu() {
-        // We use f32 for cpu since f16 is not supported for many required operations
-        Ok(candle_core::DType::F32)
-    } else if device.is_metal() {
-        // We use f32 for metal since f16 is not supported for many required operations
-        Ok(candle_core::DType::F16)
-    } else if device.is_cuda() {
-        // We use f16 for cuda since we don't actually need anything more than that for this model
-        Ok(candle_core::DType::F32)
-    } else {
-        return Err(anyhow!("Unsupported device"));
-    }
-}
-
-pub fn full<S: Into<Shape>, D: WithDType>(
+#[instrument]
+pub fn full<S: Into<Shape> + std::fmt::Debug, D: WithDType + std::fmt::Debug>(
     shape: S,
     fill_value: D,
     dtype: DType,
     device: &Device,
 ) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "full");
-    let _enter = span.enter();
-
     Tensor::new(&[fill_value], device)?
         .to_dtype(dtype)?
         .broadcast_as(shape)
 }
 
-pub fn full_like<D: WithDType>(input: &Tensor, fill_value: D) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "full-like");
-    let _enter = span.enter();
-
+#[instrument]
+pub fn full_like<D: WithDType + std::fmt::Debug>(
+    input: &Tensor,
+    fill_value: D,
+) -> candle_core::Result<Tensor> {
     full(input.shape(), fill_value, input.dtype(), input.device())
 }
 
-pub fn masked_fill<D: WithDType>(
+#[instrument]
+pub fn masked_fill<D: WithDType + std::fmt::Debug>(
     xs: &Tensor,
     mask: &Tensor,
     value: D,
 ) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "masked-fill");
-    let _enter = span.enter();
-
     let on_true = full_like(xs, value)?;
     let on_false = xs;
     mask.broadcast_as(xs.shape())?
         .where_cond(&on_true, on_false)
 }
 
+#[instrument]
 fn apply_triangular(xs: &Tensor, diagonal: isize, upper: bool) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "apply-triangular");
-    let _enter = span.enter();
-
     let device = xs.device();
     let (l, s) = xs.dims2()?;
     let mut xs_tri = vec![];
@@ -142,19 +118,14 @@ fn apply_triangular(xs: &Tensor, diagonal: isize, upper: bool) -> candle_core::R
     xs * Tensor::from_vec(xs_tri, (l, s), device)?.to_dtype(xs.dtype())?
 }
 
+#[instrument]
 pub fn logical_not(xs: &Tensor) -> Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "logical-not");
-    let _enter = span.enter();
-
     let out = xs.where_cond(&xs.zeros_like()?, &xs.ones_like()?)?;
     Ok(out)
 }
 
-// Modified to force the dropout datatype to be something supported on metal
+#[instrument]
 pub fn dropout(xs: &Tensor, drop_p: f32) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "dropout");
-    let _enter = span.enter();
-
     // This implementation is inefficient as it stores the full mask for the backward pass.
     // Instead we could just store the seed and have a specialized kernel that would both
     // generate the random mask and apply it.
@@ -170,6 +141,7 @@ pub fn dropout(xs: &Tensor, drop_p: f32) -> candle_core::Result<Tensor> {
     xs * mask
 }
 
+#[instrument]
 pub fn scaled_dot_product_attention(
     query: &Tensor,
     key: &Tensor,
@@ -232,9 +204,7 @@ pub fn scaled_dot_product_attention(
     Ok(out)
 }
 
-// Wrapper on cross entropy to add tracing
+#[instrument]
 pub fn cross_entropy(inp: &Tensor, target: &Tensor) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "cross-entropy");
-    let _enter = span.enter();
     candle_nn::loss::cross_entropy(inp, target)
 }
