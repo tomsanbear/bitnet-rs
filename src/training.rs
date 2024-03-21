@@ -3,7 +3,7 @@ use crate::optimizer::BitnetOptimizer;
 use crate::utils_tensor::cross_entropy;
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
-use candle_core::Device;
+use candle_core::{DType, Device};
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
 use candle_nn::{VarBuilder, VarMap};
@@ -33,7 +33,12 @@ fn valid_loss(
         let (inp, tgt) = inp_tgt?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
-        sum_ce += f64::from(loss.to_vec0::<f32>()?);
+        sum_ce += match loss.dtype() {
+            DType::F32 => f64::from(loss.to_vec0::<f32>()?),
+            DType::F16 => f64::from(loss.to_vec0::<half::f16>()?),
+            DType::BF16 => f64::from(loss.to_vec0::<half::bf16>()?),
+            _ => panic!("Invalid dtype"),
+        };
         cnt += 1;
     }
     Ok(sum_ce / cnt as f64)
@@ -104,7 +109,12 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         let (inp, tgt) = batch?;
         let logits = model.forward(&inp)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
-        training_loss = f64::from(loss.to_vec0::<f32>()?);
+        training_loss = match dtype {
+            candle_core::DType::F32 => f64::from(loss.to_vec0::<f32>()?),
+            candle_core::DType::F16 => f64::from(loss.to_vec0::<half::f16>()?),
+            candle_core::DType::BF16 => f64::from(loss.to_vec0::<half::bf16>()?),
+            _ => panic!("Invalid dtype"),
+        };
         opt.backward_step(&loss)?;
 
         if batch_index > 0 && batch_index % 10 == 0 {

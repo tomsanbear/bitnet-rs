@@ -2,17 +2,12 @@ use anyhow::Result;
 use candle_core::utils::{cuda_is_available, metal_is_available};
 use candle_core::{DType, Device, Shape, Tensor, WithDType, D};
 use candle_nn::ops::{self};
-use tracing::{instrument, span};
+use tracing::instrument;
 
 // Transform the input values of the tensor to it's signs, -1, 0 or 1
+#[instrument]
 pub fn sign(x: &Tensor) -> candle_core::Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "sign");
-    let _enter = span.enter();
-
-    // Implemented as by dividing by the absolute value to get the sign, we add a 1 to the numerator where x = 0 such that we don't divide by zero
-    let zeros = x
-        .eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?
-        .to_dtype(x.dtype())?;
+    let zeros = x.eq(&Tensor::zeros(x.shape(), x.dtype(), x.device())?)?;
     let abs_x = x.abs()?.add(&zeros.to_dtype(x.dtype())?)?;
     let sign_x = (x / abs_x)?;
     Ok(sign_x)
@@ -45,7 +40,6 @@ mod sign_tests {
 
 // Get the device to use for the tensor operations, only really used for tests
 // Originally from: https://github.com/huggingface/candle/blob/314630638d8f6886c07d73211d6c35f8cf05d56a/candle-examples/src/lib.rs#L9
-#[allow(dead_code)]
 pub fn device(cpu: bool) -> Result<Device> {
     if cpu {
         Ok(Device::Cpu)
@@ -151,9 +145,6 @@ pub fn scaled_dot_product_attention(
     is_causal: Option<bool>,
     scale: Option<f64>,
 ) -> Result<Tensor> {
-    let span = span!(tracing::Level::TRACE, "scaled-dot-product-attention");
-    let _enter = span.enter();
-
     let device = query.device();
     let l = query.dim(D::Minus2)?;
     let s = key.dim(D::Minus2)?;

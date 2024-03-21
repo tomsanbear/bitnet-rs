@@ -80,9 +80,9 @@ impl Bitlinear {
         let group_size = self.weight.dims()[0] / self.num_groups;
         for i in 0..self.num_groups {
             let start_idx = i * group_size;
-            let weights_group = self.weight.narrow(0, start_idx, group_size)?;
+            let weights_group = self.weight.narrow(0, start_idx, group_size)?.contiguous()?;
             let alpha_g = weights_group.mean_all()?;
-            let beta = weights_group.abs()?.mean_all()?;
+            let beta = weights_group.abs()?.mean(D::Minus1)?.mean(D::Minus1)?;
             beta_groups.push(beta);
             let binarized_weights = self.ste(&(weights_group.broadcast_sub(&alpha_g)?))?;
             binarized_weight_groups.push(binarized_weights);
@@ -100,8 +100,7 @@ impl Bitlinear {
         beta: &Tensor,
         gamma: &Tensor,
     ) -> anyhow::Result<Tensor> {
-        let x = (x.broadcast_mul(gamma)?.broadcast_mul(beta)? / self.q_b)?;
-        Ok(x)
+        Ok((x.broadcast_mul(gamma)?.broadcast_mul(beta)? / self.q_b)?)
     }
 
     #[instrument]

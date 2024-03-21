@@ -8,12 +8,12 @@ edition = "2021"
 [dependencies]
 accelerate-src = { version = "0.3.2", optional = true }
 anyhow = "1.0.80"
-candle-core = "0.4"
-candle-datasets = "0.4"
-candle-einops = "0.1.0"
-candle-flash-attn = { version = "0.4.1", optional = true }
-candle-nn = "0.4"
-candle-transformers = "0.4"
+candle-core = { git = "https://github.com/huggingface/candle.git" }
+candle-datasets = { git = "https://github.com/huggingface/candle.git" }
+candle-einops = { git = "https://github.com/tomsanbear/candle-einops", branch = "latest-candle" }
+candle-flash-attn = { git = "https://github.com/huggingface/candle.git", optional = true }
+candle-nn = { git = "https://github.com/huggingface/candle.git" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git" }
 clap = "4.5.1"
 crossterm = "0.27.0"
 cudarc = { version = "0.10.0", optional = true }

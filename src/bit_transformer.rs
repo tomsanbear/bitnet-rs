@@ -1,10 +1,11 @@
 use crate::bit_attention::{BitAttention, BitAttentionCfg};
 use crate::bit_ffn::{BitFeedForward, BitFeedForwardCfg};
 use crate::config::Config;
+use crate::embedding::Embedding;
 use crate::rms_norm::RmsNorm;
 use anyhow::Result;
-use candle_core::{Module, Tensor};
-use candle_nn::{embedding, Embedding, VarBuilder};
+use candle_core::{DType, Module, Tensor};
+use candle_nn::{Init, VarBuilder};
 use candle_transformers::models::with_tracing::{linear, Linear};
 use tracing::instrument;
 
@@ -18,7 +19,7 @@ pub struct BitTransformer {
 
 impl BitTransformer {
     pub fn load(cfg: Config, vb: VarBuilder, train: bool) -> Result<Self> {
-        let embedding = embedding(cfg.vocab_size, cfg.dim, vb.pp("embedding"))?;
+        let embedding = Embedding::new(cfg.vocab_size, cfg.dim, vb.pp("embedding"))?;
         let blocks: Vec<_> = (0..(cfg.depth))
             .map(|i| {
                 (
@@ -64,21 +65,20 @@ impl BitTransformer {
     #[instrument]
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         // Run the embedding layer
-        let x_embed = self.embedding.forward(x)?;
+        let x_embed = self.embedding.forward(&x)?;
 
         // Fold each block forward
-        let x = self.blocks.iter().fold(x_embed.clone(), |x, (attn, ffn)| {
-            let x = attn.forward(&x, true).unwrap();
-            let x = x.add(&x_embed).unwrap();
-            let x = ffn.forward(&x).unwrap();
-            x.add(&x).unwrap()
-        });
+        let mut x = x_embed.clone();
+        for (attn, ffn) in &self.blocks {
+            x = attn.forward(&x, true)?;
+            x = x.add(&x_embed)?;
+            x = ffn.forward(&x)?;
+            x = x.add(&x)?;
+        }
 
         // Convert to logits
         let x = self.rms_norm.forward(&x)?;
         let x = self.logits_linear.forward(&x)?;
-
-        // Return the logits
         Ok(x)
     }
 }
