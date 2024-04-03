@@ -71,7 +71,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
 
     // Get the datasets
-    let dataset = { Dataset::new(args.dataset.to_string())? };
+    let dataset = { Dataset::new(&args.dataset)? };
 
     // Setup the model
     let config = Config {

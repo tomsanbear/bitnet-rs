@@ -65,7 +65,7 @@ impl BitTransformer {
     #[instrument]
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
         // Run the embedding layer
-        let x_embed = self.embedding.forward(&x)?;
+        let x_embed = self.embedding.forward(x)?;
 
         // Fold each block forward
         let mut x = x_embed.clone();
