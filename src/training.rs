@@ -1,12 +1,11 @@
 use crate::config::Config;
-use crate::optimizer::BitnetOptimizer;
 use crate::utils_tensor::cross_entropy;
 use crate::{bit_transformer::BitTransformer, utils_tensor::device, Args, TrainingCmd};
 use anyhow::Result;
 use candle_core::{DType, Device};
 use candle_datasets::nlp::tinystories::{Dataset, DatasetRandomIter};
 use candle_datasets::Batcher;
-use candle_nn::{VarBuilder, VarMap};
+use candle_nn::{AdamW, Optimizer, VarBuilder, VarMap};
 use kdam::{tqdm, BarExt};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::span;
@@ -72,7 +71,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let vb = VarBuilder::from_varmap(&varmap, dtype, &device);
 
     // Get the datasets
-    let dataset = { Dataset::new("../../karpathy/llama2.c/data/TinyStories_all_data")? };
+    let dataset = { Dataset::new(args.dataset.to_string())? };
 
     // Setup the model
     let config = Config {
@@ -82,7 +81,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
     let mut model = BitTransformer::load(config, vb, true)?;
 
     // Setup the optimizer
-    let mut opt = BitnetOptimizer::load(varmap.all_vars(), args.learning_rate)?;
+    let mut opt = AdamW::new_lr(varmap.all_vars(), args.learning_rate)?;
 
     // Setup the dataset, currently using tinystories to replicate the llama example from candle
     let iter = DatasetRandomIter::new(&dataset, true, args.seq_len, device.clone());

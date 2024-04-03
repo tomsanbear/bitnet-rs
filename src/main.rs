@@ -6,7 +6,6 @@ mod bit_transformer;
 mod config;
 mod embedding;
 mod inference;
-mod optimizer;
 mod rms_norm;
 mod training;
 mod utils_tensor;

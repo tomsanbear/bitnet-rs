@@ -4,8 +4,8 @@ use crate::config::Config;
 use crate::embedding::Embedding;
 use crate::rms_norm::RmsNorm;
 use anyhow::Result;
-use candle_core::{DType, Module, Tensor};
-use candle_nn::{Init, VarBuilder};
+use candle_core::{Module, Tensor};
+use candle_nn::VarBuilder;
 use candle_transformers::models::with_tracing::{linear, Linear};
 use tracing::instrument;
 

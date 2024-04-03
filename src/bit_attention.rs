@@ -73,7 +73,7 @@ impl BitAttention {
                 num_groups: 1,
                 b: 8,
                 eps: cfg.eps,
-                bias: true,
+                bias: cfg.bias,
             },
             vb.pp("qkv_proj"),
         )?;

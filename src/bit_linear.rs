@@ -21,8 +21,7 @@ pub struct Bitlinear {
     weight: Tensor,
     bias: Option<Tensor>,
     layer_norm: LayerNorm,
-    eps: f32,
-    eps_t: Tensor,
+    eps: f64,
     q_b: f64,
 }
 
@@ -49,15 +48,13 @@ impl Bitlinear {
             vb.pp("layer_norm"),
         )?;
         let q_b = 2f64.powi(cfg.b - 1);
-        let eps_t = Tensor::new(cfg.eps, vb.device())?.to_dtype(vb.dtype())?;
         Ok(Self {
             num_groups: cfg.num_groups,
             weight,
             layer_norm,
             bias,
-            eps: cfg.eps,
+            eps: cfg.eps as f64,
             q_b,
-            eps_t,
         })
     }
 
@@ -80,7 +77,7 @@ impl Bitlinear {
         let group_size = self.weight.dims()[0] / self.num_groups;
         for i in 0..self.num_groups {
             let start_idx = i * group_size;
-            let weights_group = self.weight.narrow(0, start_idx, group_size)?.contiguous()?;
+            let weights_group = self.weight.narrow(0, start_idx, group_size)?;
             let alpha_g = weights_group.mean_all()?;
             let beta = weights_group.abs()?.mean(D::Minus1)?.mean(D::Minus1)?;
             beta_groups.push(beta);
@@ -100,7 +97,16 @@ impl Bitlinear {
         beta: &Tensor,
         gamma: &Tensor,
     ) -> anyhow::Result<Tensor> {
-        Ok((x.broadcast_mul(gamma)?.broadcast_mul(beta)? / self.q_b)?)
+        Ok((x
+            .broadcast_mul(
+                &gamma
+                    .unsqueeze(D::Minus1)
+                    .unwrap()
+                    .unsqueeze(D::Minus1)
+                    .unwrap(),
+            )?
+            .broadcast_mul(beta)?
+            / self.q_b)?)
     }
 
     #[instrument]
@@ -112,12 +118,18 @@ impl Bitlinear {
             let start_idx = i * group_size;
             let activation_group = x.narrow(0, start_idx, group_size).unwrap();
             let gamma = activation_group.abs()?.max(D::Minus1)?.max(D::Minus1)?;
-            let gamma = gamma.expand(&[group_size]).unwrap();
-            let clamp_min = -self.q_b + self.eps as f64;
-            let clamp_max = self.q_b - self.eps as f64;
+            let clamp_min = -self.q_b + self.eps;
+            let clamp_max = self.q_b - self.eps;
             let x = (activation_group * self.q_b).unwrap();
             let x = x
-                .broadcast_div(&gamma.broadcast_add(&self.eps_t).unwrap())
+                .broadcast_div(
+                    &(gamma.clone() + self.eps)
+                        .unwrap()
+                        .unsqueeze(D::Minus1)
+                        .unwrap()
+                        .unsqueeze(D::Minus1)
+                        .unwrap(),
+                )
                 .unwrap();
             let quantized_x = x.clamp(clamp_min, clamp_max).unwrap();
             quantized_x_groups.push(quantized_x);
