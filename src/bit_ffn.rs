@@ -1,7 +1,8 @@
 use crate::bit_dropout::{Dropout, DropoutCfg};
 use crate::bit_linear::{Bitlinear, BitlinearCfg};
+use crate::rms_norm::RmsNorm;
 use candle_core::{Module, Tensor};
-use candle_nn::{layer_norm, Activation, LayerNorm, LayerNormConfig, VarBuilder};
+use candle_nn::{Activation, VarBuilder};
 use tracing::instrument;
 
 pub struct BitFeedForwardCfg {
@@ -14,11 +15,11 @@ pub struct BitFeedForwardCfg {
 
 #[derive(Debug)]
 pub struct BitFeedForward {
-    glu_linear: Bitlinear,
+    proj_in: Bitlinear,
     activation: Activation,
-    norm: LayerNorm,
+    post_act_norm: RmsNorm,
     dropout: Dropout,
-    linear: Bitlinear,
+    proj_out: Bitlinear,
 }
 
 impl BitFeedForward {
@@ -26,9 +27,8 @@ impl BitFeedForward {
         // Setup internal parameters
         let inner_dim = cfg.dim * cfg.ff_mult;
 
-        // GELU is used as activation function
-        // The original implementation has the option for SiLU, look into adding that at some point
-        let activation = Activation::Gelu;
+        // Use swiglu from 1.58 paper
+        let activation = Activation::Swiglu;
 
         // Dropout layer, if train is passed then this is skipped
         let dropout = Dropout::load(DropoutCfg {
@@ -36,27 +36,21 @@ impl BitFeedForward {
             is_training: cfg.train,
         })?;
 
-        // Layer normalization
-        let norm = layer_norm(
-            inner_dim,
-            LayerNormConfig {
-                eps: cfg.eps.into(),
-                ..LayerNormConfig::default()
-            },
-            vb.pp("norm"),
-        )?;
+        // Post activation normalization
+        let post_act_norm = RmsNorm::load(cfg.eps, inner_dim, vb.pp("norm"))?;
 
-        let glu_linear = Bitlinear::load(
+        // Input linear layer
+        let proj_in = Bitlinear::load(
             BitlinearCfg {
                 in_features: cfg.dim,
-                out_features: inner_dim,
+                out_features: inner_dim * 2,
                 eps: cfg.eps,
             },
             vb.pp("proj"),
         )?;
 
         // Linear layer
-        let linear = Bitlinear::load(
+        let proj_out = Bitlinear::load(
             BitlinearCfg {
                 in_features: inner_dim,
                 out_features: cfg.dim,
@@ -67,21 +61,21 @@ impl BitFeedForward {
 
         // Return the layer as a sequential module
         Ok(Self {
-            glu_linear,
+            proj_in,
             activation,
-            norm,
+            post_act_norm,
             dropout,
-            linear,
+            proj_out,
         })
     }
 
     #[instrument]
     pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
-        let x = self.glu_linear.forward(x)?;
+        let x = self.proj_in.forward(x)?;
         let x = self.activation.forward(&x)?;
-        let x = self.norm.forward(&x)?;
+        let x = self.post_act_norm.forward(&x)?;
         let x = self.dropout.forward(&x)?;
-        let x = self.linear.forward(&x)?;
+        let x = self.proj_out.forward(&x)?;
         Ok(x)
     }
 }

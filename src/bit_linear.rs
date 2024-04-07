@@ -39,7 +39,9 @@ impl Bitlinear {
                     .max(D::Minus1)?
                     .max(D::Minus1)?
                     .clamp(1e-5, f32::INFINITY)?)?;
-            let y = x.broadcast_mul(&scale)?.clamp(-128.0, 127.0)?;
+            let y = x
+                .broadcast_mul(&scale.unsqueeze(D::Minus1)?.unsqueeze(D::Minus1)?)?
+                .clamp(-128.0, 127.0)?;
             Ok(y)
         }
 
