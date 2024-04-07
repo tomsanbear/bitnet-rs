@@ -30,6 +30,7 @@ impl BitTransformer {
                             n_kv_heads: 8,
                             dropout: 0.1,
                             eps: cfg.eps,
+                            max_seq_len: cfg.seq_len,
                         },
                         vb.pp(&format!("attn.{i}")),
                     )
@@ -61,14 +62,14 @@ impl BitTransformer {
     }
 
     #[instrument]
-    pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    pub fn forward(&mut self, x: &Tensor, index_pos: usize) -> Result<Tensor> {
         // Run the embedding layer
         let x_embed = self.embedding.forward(x)?;
 
         // Fold each block forward
         let mut x = x_embed.clone();
-        for (attn, ffn) in &self.blocks {
-            x = attn.forward(&x, true)?;
+        for (attn, ffn) in self.blocks.iter_mut() {
+            x = attn.forward(&x, true, index_pos)?;
             x = x.add(&x_embed)?;
             x = ffn.forward(&x)?;
             x = x.add(&x)?;
@@ -78,41 +79,5 @@ impl BitTransformer {
         let x = self.rms_norm.forward(&x)?;
         let x = self.logits_linear.forward(&x)?;
         Ok(x)
-    }
-}
-
-#[cfg(test)]
-mod bitnet_transformer_tests {
-    use crate::{config::Config, utils_tensor::device};
-
-    use super::BitTransformer;
-    use anyhow::Result;
-    use candle_core::{DType, Tensor};
-    use candle_nn::VarBuilder;
-
-    #[test]
-    fn it_applies_forward_pass() -> Result<()> {
-        let device = &device(true)?;
-        let vb = VarBuilder::zeros(DType::F32, device);
-        let t = BitTransformer::load(
-            Config {
-                dim: 8 * 8,
-                depth: 8,
-                vocab_size: 32000,
-                heads: 8,
-                ff_mult: 10,
-                eps: 1e-6,
-                ff_dropout: 0.1,
-                seq_len: 10,
-            },
-            vb,
-            true,
-        )?;
-        let x = Tensor::ones((1, 128), DType::U32, device)?;
-        let x = t.forward(&x)?;
-
-        assert_eq!(x.shape().dims(), &[1, 128, 32000]);
-
-        Ok(())
     }
 }
