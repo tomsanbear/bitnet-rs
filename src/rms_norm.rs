@@ -8,7 +8,7 @@ pub struct RmsNorm {
 }
 
 impl RmsNorm {
-    pub fn load(rms_norm_eps: f32, size: usize, vb: VarBuilder) -> Result<Self> {
+    pub fn load(rms_norm_eps: f64, size: usize, vb: VarBuilder) -> Result<Self> {
         let inner = candle_nn::rms_norm(size, rms_norm_eps.into(), vb)?;
         Ok(Self { inner })
     }
@@ -31,14 +31,14 @@ mod rmsnorm_tests {
     #[test]
     fn it_loads() -> Result<()> {
         let vb = VarBuilder::zeros(DType::F64, &Device::Cpu);
-        RmsNorm::load(1e-6f32, 512, vb)?;
+        RmsNorm::load(1e-6, 512, vb)?;
         Ok(())
     }
 
     #[test]
     fn it_applies_forward_pass() -> Result<()> {
         let vb = VarBuilder::zeros(DType::F32, &Device::Cpu);
-        let rmsnorm = RmsNorm::load(1e-6f32, 512, vb)?;
+        let rmsnorm = RmsNorm::load(1e-6, 512, vb)?;
         let input = Tensor::ones((1, 512), DType::F32, &Device::Cpu)?;
         let output = rmsnorm.forward(&input).unwrap();
         assert_eq!(output.shape().dims(), &[1, 512]);

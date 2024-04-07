@@ -5,7 +5,7 @@ pub struct Config {
     pub(crate) vocab_size: usize,
     pub(crate) heads: usize,
     pub(crate) ff_mult: usize,
-    pub(crate) eps: f32,
+    pub(crate) eps: f64,
     pub(crate) ff_dropout: f32,
     pub(crate) seq_len: usize,
 }

@@ -29,8 +29,6 @@ impl BitTransformer {
                             n_heads: cfg.heads,
                             n_kv_heads: 8,
                             dropout: 0.1,
-                            layer_norm_enabled: true,
-                            bias: true,
                             eps: cfg.eps,
                         },
                         vb.pp(&format!("attn.{i}")),

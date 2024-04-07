@@ -116,7 +116,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         };
         opt.backward_step(&loss)?;
 
-        if batch_index > 0 && batch_index % 10 == 0 {
+        if batch_index > 0 && batch_index % 100 == 0 {
             validation_loss =
                 valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
             if batch_index % 10000 == 0 {

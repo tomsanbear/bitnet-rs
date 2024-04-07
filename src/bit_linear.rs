@@ -1,28 +1,20 @@
-use crate::utils_tensor::sign;
 use anyhow::Ok;
 use candle_core::{Tensor, D};
-use candle_nn::{layer_norm, Init, LayerNorm, LayerNormConfig, Module, VarBuilder};
-use candle_transformers::models::with_tracing::Linear;
+use candle_nn::{Init, Module, VarBuilder};
+use candle_transformers::models::with_tracing::{Linear, RmsNorm};
 use tracing::instrument;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BitlinearCfg {
     pub in_features: usize,
     pub out_features: usize,
-    pub num_groups: usize,
-    pub b: i32,
-    pub eps: f32,
-    pub bias: bool,
+    pub eps: f64,
 }
 
 #[derive(Debug)]
 pub struct Bitlinear {
-    num_groups: usize,
     weight: Tensor,
-    bias: Option<Tensor>,
-    layer_norm: LayerNorm,
-    eps: f64,
-    q_b: f64,
+    layer_norm: RmsNorm,
 }
 
 impl Bitlinear {
@@ -35,134 +27,40 @@ impl Bitlinear {
                 stdev: 1.0,
             },
         )?;
-        let bias = match cfg.bias {
-            true => Some(vb.get_with_hints(cfg.out_features, "bias", Init::Const(0.0))?),
-            false => None,
-        };
-        let layer_norm = layer_norm(
-            cfg.in_features,
-            LayerNormConfig {
-                eps: cfg.eps.into(),
-                ..LayerNormConfig::default()
-            },
-            vb.pp("layer_norm"),
-        )?;
-        let q_b = 2f64.powi(cfg.b - 1);
-        Ok(Self {
-            num_groups: cfg.num_groups,
-            weight,
-            layer_norm,
-            bias,
-            eps: cfg.eps as f64,
-            q_b,
-        })
-    }
-
-    #[instrument]
-    fn ste(&self, x: &Tensor) -> candle_core::Result<Tensor> {
-        let binarized_x = sign(x)?;
-        (binarized_x - x)?.detach() + x
-    }
-
-    #[instrument]
-    fn binarize_weights_groupwise(&self) -> anyhow::Result<(Tensor, Tensor)> {
-        /*
-         * Note:
-         * The original code uses slice assignment on a zeroed tensor to create the final tensor
-         * We instead push the chunks into a vector then combine at the very end to avoid the need to call
-         * slice_assign.
-         */
-        let mut binarized_weight_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
-        let mut beta_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
-        let group_size = self.weight.dims()[0] / self.num_groups;
-        for i in 0..self.num_groups {
-            let start_idx = i * group_size;
-            let weights_group = self.weight.narrow(0, start_idx, group_size)?;
-            let alpha_g = weights_group.mean_all()?;
-            let beta = weights_group.abs()?.mean(D::Minus1)?.mean(D::Minus1)?;
-            beta_groups.push(beta);
-            let binarized_weights = self.ste(&(weights_group.broadcast_sub(&alpha_g)?))?;
-            binarized_weight_groups.push(binarized_weights);
-        }
-
-        let binarized_weights = Tensor::cat(&binarized_weight_groups, D::Minus1)?;
-        let beta = Tensor::cat(&beta_groups, D::Minus1)?;
-        Ok((binarized_weights, beta))
-    }
-
-    #[instrument]
-    fn dequantize_activations(
-        &self,
-        x: &Tensor,
-        beta: &Tensor,
-        gamma: &Tensor,
-    ) -> anyhow::Result<Tensor> {
-        Ok((x
-            .broadcast_mul(
-                &gamma
-                    .unsqueeze(D::Minus1)
-                    .unwrap()
-                    .unsqueeze(D::Minus1)
-                    .unwrap(),
-            )?
-            .broadcast_mul(beta)?
-            / self.q_b)?)
-    }
-
-    #[instrument]
-    fn quantize_activations(&self, x: &Tensor) -> anyhow::Result<(Tensor, Tensor)> {
-        let mut quantized_x_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
-        let mut gamma_groups: Vec<Tensor> = Vec::with_capacity(self.num_groups);
-        let group_size = x.dims()[0] / self.num_groups;
-        for i in 0..self.num_groups {
-            let start_idx = i * group_size;
-            let activation_group = x.narrow(0, start_idx, group_size).unwrap();
-            let gamma = activation_group.abs()?.max(D::Minus1)?.max(D::Minus1)?;
-            let clamp_min = -self.q_b + self.eps;
-            let clamp_max = self.q_b - self.eps;
-            let x = (activation_group * self.q_b).unwrap();
-            let x = x
-                .broadcast_div(
-                    &(gamma.clone() + self.eps)
-                        .unwrap()
-                        .unsqueeze(D::Minus1)
-                        .unwrap()
-                        .unsqueeze(D::Minus1)
-                        .unwrap(),
-                )
-                .unwrap();
-            let quantized_x = x.clamp(clamp_min, clamp_max).unwrap();
-            quantized_x_groups.push(quantized_x);
-            gamma_groups.push(gamma.clone());
-        }
-        let quantized_x = Tensor::cat(&quantized_x_groups, 0)?;
-        let gamma = Tensor::cat(&gamma_groups, 0)?;
-        Ok((quantized_x, gamma))
+        let layer_norm = RmsNorm::new(cfg.in_features, cfg.eps, vb.pp("rms_norm"))?;
+        Ok(Self { weight, layer_norm })
     }
 
     #[instrument]
     pub fn forward(&self, x: &Tensor) -> anyhow::Result<Tensor> {
-        // normalize input
-        let x = self.layer_norm.forward(x)?;
+        fn activation_quant(x: &Tensor) -> anyhow::Result<Tensor> {
+            let scale = (127.0
+                / x.abs()?
+                    .max(D::Minus1)?
+                    .max(D::Minus1)?
+                    .clamp(1e-5, f32::INFINITY)?)?;
+            let y = x.broadcast_mul(&scale)?.clamp(-128.0, 127.0)?;
+            Ok(y)
+        }
 
-        // binarize weights and quantize activations
-        let (binarized_weights, beta) = self.binarize_weights_groupwise()?;
+        fn weight_quant(x: &Tensor) -> anyhow::Result<Tensor> {
+            let scale = x.abs()?.mean_all()?;
+            let e = x.mean_all()?;
+            let u = x.broadcast_sub(&e)?.sign()?.broadcast_mul(&scale)?;
+            Ok(u)
+        }
 
-        // quantize activations
-        let (x_quantized, gamma) = self.quantize_activations(&x)?;
+        let weight = self.weight.clone();
 
-        // perform linear transformation
-        let output = match &self.bias {
-            Some(bias) => {
-                Linear::from_weights(binarized_weights, Some(bias.clone())).forward(&x_quantized)?
-            }
-            None => Linear::from_weights(binarized_weights, None).forward(&x_quantized)?,
-        };
+        let x_norm = self.layer_norm.forward(x)?;
 
-        // dequantize activations
-        let output = self.dequantize_activations(&output, &beta, &gamma)?;
+        let x_quant = (x_norm.clone() + (activation_quant(&x_norm)? - x_norm)?.detach())?;
 
-        Ok(output)
+        let w_quant = (weight.clone() + (weight_quant(&weight)? - weight)?.detach())?;
+
+        let y = Linear::from_weights(w_quant, None).forward(&x_quant)?;
+
+        Ok(y)
     }
 }
 
@@ -183,10 +81,7 @@ mod bitlinear_tests {
             BitlinearCfg {
                 in_features,
                 out_features,
-                num_groups: 1,
-                b: 8,
                 eps: 1e-6,
-                bias: true,
             },
             vb,
         )?;

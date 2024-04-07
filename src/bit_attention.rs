@@ -3,9 +3,9 @@ use crate::{
     utils_tensor::scaled_dot_product_attention,
 };
 use anyhow::{anyhow, Result};
-use candle_core::{Tensor, D};
+use candle_core::Tensor;
 use candle_einops::einops;
-use candle_nn::{layer_norm, LayerNormConfig, Module, VarBuilder};
+use candle_nn::VarBuilder;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,19 +14,16 @@ pub struct BitAttentionCfg {
     pub n_heads: usize,
     pub n_kv_heads: usize,
     pub dropout: f32,
-    pub bias: bool,
-    pub layer_norm_enabled: bool,
-    pub eps: f32,
+    pub eps: f64,
 }
 
 #[derive(Debug)]
 pub struct BitAttention {
-    qkv_proj: Bitlinear,
+    q_proj: Bitlinear,
+    k_proj: Bitlinear,
+    v_proj: Bitlinear,
     o_proj: Bitlinear,
-    norm: Option<candle_nn::LayerNorm>,
     dropout: f32,
-    dim: usize,
-    head_dim: usize,
     n_heads: usize,
     n_kv_heads: usize,
 }
@@ -65,52 +62,45 @@ impl BitAttention {
             return Err(anyhow!("head_dim must be less than or equal to 128"));
         }
 
-        let total_head_dim = (cfg.n_heads + (2 * cfg.n_kv_heads)) * head_dim;
-        let qkv_proj = Bitlinear::load(
+        let q_proj = Bitlinear::load(
             BitlinearCfg {
                 in_features: cfg.dim,
-                out_features: total_head_dim,
-                num_groups: 1,
-                b: 8,
+                out_features: cfg.n_heads * head_dim,
                 eps: cfg.eps,
-                bias: cfg.bias,
             },
-            vb.pp("qkv_proj"),
+            vb.pp("q_proj"),
         )?;
-
-        let norm = match cfg.layer_norm_enabled {
-            true => {
-                let config = LayerNormConfig {
-                    eps: cfg.eps.into(),
-                    ..LayerNormConfig::default()
-                };
-                Some(layer_norm(
-                    head_dim * cfg.n_kv_heads,
-                    config,
-                    vb.pp("layer_norm"),
-                )?)
-            }
-            false => None,
-        };
+        let k_proj = Bitlinear::load(
+            BitlinearCfg {
+                in_features: cfg.dim,
+                out_features: cfg.n_kv_heads * head_dim,
+                eps: cfg.eps,
+            },
+            vb.pp("k_proj"),
+        )?;
+        let v_proj = Bitlinear::load(
+            BitlinearCfg {
+                in_features: cfg.dim,
+                out_features: cfg.n_kv_heads * head_dim,
+                eps: cfg.eps,
+            },
+            vb.pp("v_proj"),
+        )?;
 
         let o_proj = Bitlinear::load(
             BitlinearCfg {
                 in_features: cfg.dim,
                 out_features: cfg.dim,
-                num_groups: 1,
-                b: 8,
                 eps: cfg.eps,
-                bias: true,
             },
             vb.pp("o_proj"),
         )?;
 
         Ok(BitAttention {
-            qkv_proj,
+            q_proj,
+            k_proj,
+            v_proj,
             o_proj,
-            norm,
-            dim: cfg.dim,
-            head_dim,
             n_heads: cfg.n_heads,
             n_kv_heads: cfg.n_kv_heads,
             dropout: cfg.dropout,
@@ -119,12 +109,9 @@ impl BitAttention {
 
     #[instrument]
     pub fn forward(&self, x: &Tensor, is_causal: bool) -> Result<Tensor> {
-        let qkv = self.qkv_proj.forward(x)?;
-
-        let kv_size = self.n_kv_heads * self.head_dim;
-        let q = qkv.narrow(D::Minus1, 0, self.dim)?;
-        let k = qkv.narrow(D::Minus1, self.dim, kv_size)?;
-        let v = qkv.narrow(D::Minus1, self.dim + kv_size, kv_size)?;
+        let q = self.q_proj.forward(x)?;
+        let k = self.k_proj.forward(x)?;
+        let v = self.v_proj.forward(x)?;
 
         let q = einops!("b n ({self.n_heads} d) -> b n {self.n_heads} d", q);
         let k = einops!("b n ({self.n_kv_heads} d) -> b n {self.n_kv_heads} d", k);
@@ -141,10 +128,6 @@ impl BitAttention {
             Some(scale),
         )?;
         let x = einops!("b n h d -> b n (h d)", x);
-        let x = match self.norm {
-            Some(ref norm) => norm.forward(&x)?,
-            None => x,
-        };
         let x = self.o_proj.forward(&x)?;
         Ok(x)
     }
@@ -170,9 +153,7 @@ mod bit_attention_tests {
                 dim: 64,
                 n_heads: 8,
                 n_kv_heads: 8,
-                bias: true,
                 dropout: 0.1,
-                layer_norm_enabled: true,
                 eps: 1e-6,
             },
             vb,
@@ -197,9 +178,7 @@ mod bit_attention_tests {
                 dim: 64,
                 n_heads: 8,
                 n_kv_heads: 8,
-                bias: true,
                 dropout: 0.1,
-                layer_norm_enabled: true,
                 eps: 1e-6,
             },
             vb,
@@ -224,9 +203,7 @@ mod bit_attention_tests {
                 dim: 64,
                 n_heads: 8,
                 n_kv_heads: 8,
-                bias: true,
                 dropout: 0.1,
-                layer_norm_enabled: true,
                 eps: 1e-6,
             },
             vb,

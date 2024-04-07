@@ -9,7 +9,7 @@ pub struct BitFeedForwardCfg {
     pub ff_mult: usize,
     pub dropout: f32,
     pub train: bool,
-    pub eps: f32,
+    pub eps: f64,
 }
 
 #[derive(Debug)]
@@ -50,10 +50,7 @@ impl BitFeedForward {
             BitlinearCfg {
                 in_features: cfg.dim,
                 out_features: inner_dim,
-                num_groups: 1,
-                b: 8,
                 eps: cfg.eps,
-                bias: true,
             },
             vb.pp("proj"),
         )?;
@@ -63,10 +60,7 @@ impl BitFeedForward {
             BitlinearCfg {
                 in_features: inner_dim,
                 out_features: cfg.dim,
-                num_groups: 1,
-                b: 8,
                 eps: cfg.eps,
-                bias: true,
             },
             vb.pp("linear"),
         )?;
