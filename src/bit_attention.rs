@@ -197,7 +197,7 @@ mod bit_attention_tests {
         bit_attention::{BitAttention, BitAttentionCfg},
         utils_tensor::device,
     };
-    use candle_core::{DType, Tensor};
+    use candle_core::Tensor;
     use candle_nn::VarBuilder;
 
     #[test]
