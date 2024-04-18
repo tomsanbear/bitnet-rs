@@ -89,7 +89,7 @@ mod bitlinear_tests {
         )?;
         let input: Tensor = Tensor::randn(0.0f32, 1.0f32, (1, 64), &device.clone())?;
         let output = bl.forward(&input)?;
-        assert_eq!(output.shape().dims2()?, (64, 64));
+        assert_eq!(output.shape().dims2()?, (1, 64));
         Ok(())
     }
 }
