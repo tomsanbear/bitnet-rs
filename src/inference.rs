@@ -27,7 +27,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
     let vb = VarBuilder::from_tensors(safetensors, DType::F32, &device);
 
     let config = Config::default();
-    let model = BitTransformer::load(config, vb, false)?;
+    let mut model = BitTransformer::load(config, vb, false)?;
 
     println!("starting the inference loop");
     let mut logits_processor = LogitsProcessor::new(rng.gen(), args.temperature, Some(args.top_p));
@@ -52,7 +52,7 @@ pub fn run(args: &InferenceCmd, common_args: &Args) -> Result<()> {
         let context_size = if index > 0 { 1 } else { tokens.len() };
         let ctxt = &tokens[tokens.len().saturating_sub(context_size)..];
         let input = Tensor::new(ctxt, &device)?.unsqueeze(0)?;
-        let logits = model.forward(&input)?;
+        let logits = model.forward(&input, index)?;
         let logits = logits.i((0, logits.dim(1)? - 1))?;
         let logits = if args.repeat_penalty == 1. || tokens.is_empty() {
             logits

@@ -30,7 +30,7 @@ fn valid_loss(
         let span = span!(tracing::Level::TRACE, "validate-loss-iter");
         let _enter = span.enter();
         let (inp, tgt) = inp_tgt?;
-        let logits = model.forward(&inp)?;
+        let logits = model.forward(&inp, 0)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         sum_ce += match loss.dtype() {
             DType::F32 => f64::from(loss.to_vec0::<f32>()?),
@@ -106,7 +106,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         let _enter = span.enter();
 
         let (inp, tgt) = batch?;
-        let logits = model.forward(&inp)?;
+        let logits = model.forward(&inp, 0)?;
         let loss = cross_entropy(&logits.flatten_to(1)?, &tgt.flatten_to(1)?)?;
         training_loss = match dtype {
             candle_core::DType::F32 => f64::from(loss.to_vec0::<f32>()?),
@@ -116,7 +116,7 @@ pub fn run(args: &TrainingCmd, common_args: &Args) -> Result<()> {
         };
         opt.backward_step(&loss)?;
 
-        if batch_index > 0 && batch_index % 10 == 0 {
+        if batch_index > 0 && batch_index % 100 == 0 {
             validation_loss =
                 valid_loss(args.seq_len, args.batch_size, &dataset, &mut model, &device)?;
             if batch_index % 10000 == 0 {
