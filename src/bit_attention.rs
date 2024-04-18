@@ -120,7 +120,7 @@ impl BitAttention {
             vb.pp("o_proj"),
         )?;
 
-        let (cos, sin) = precompute_freqs_cis(head_dim, 10000., cfg.max_seq_len, &vb.device())?;
+        let (cos, sin) = precompute_freqs_cis(head_dim, 10000., cfg.max_seq_len, vb.device())?;
 
         Ok(BitAttention {
             q_proj,
